@@ -6,6 +6,7 @@ const clientService = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
+const CLE_SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
 function formaterDateLongue(dateIso: string): string {
   return new Date(`${dateIso}T00:00:00Z`).toLocaleDateString("fr-FR", {
@@ -23,6 +24,10 @@ webpush.setVapidDetails(
 );
 
 Deno.serve(async (requete) => {
+  if (!CLE_SERVICE || requete.headers.get("authorization") !== `Bearer ${CLE_SERVICE}`) {
+    return new Response("Acces reserve aux taches planifiees.", { status: 401 });
+  }
+
   const { creneau } = await requete.json().catch(() => ({ creneau: "midi" }));
   const { data: dateService, error: erreurDate } = await clientService.rpc("prochain_jour_ouvre");
   if (erreurDate || !dateService) {
