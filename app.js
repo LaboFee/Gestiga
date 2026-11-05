@@ -139,7 +139,8 @@
   }
   function vueGestion() {
     const enAttente = etat.profils.filter((p) => p.statut_compte === 'en_attente');
-    return `<div class="carte"><h2>Comptes à valider</h2>${enAttente.length ? `<ul class="liste">${enAttente.map((p) => `<li>${echapper(p.nom_affiche || p.courriel || 'Nouveau compte')} · ${echapper(p.courriel || '')}<span><button class="bouton principal" data-valider="${p.id}" data-categorie="invite">Valider comme invité</button> <button class="bouton" data-valider="${p.id}" data-categorie="titulaire">Comme titulaire</button></span></li>`).join('')}</ul>` : '<p class="vide">Aucun compte en attente.</p>'}</div>
+    return `<div class="carte"><h2>Créer les trajets d’une journée</h2><p class="doux">Choisissez un jour ouvré. Gestiga prépare les trajets pour tous les véhicules actifs, ajoute les destinations actives et crée les demandes des titulaires dans la limite des places.</p><form id="form-planning" class="formulaire grille-2"><label>Date du trajet<input type="date" name="date_service" min="${dateAbidjan(new Date())}" value="${dateAbidjan(new Date())}" required></label><button class="bouton principal">Préparer les trajets</button></form></div>
+      <div class="carte"><h2>Comptes à valider</h2>${enAttente.length ? `<ul class="liste">${enAttente.map((p) => `<li>${echapper(p.nom_affiche || p.courriel || 'Nouveau compte')} · ${echapper(p.courriel || '')}<span><button class="bouton principal" data-valider="${p.id}" data-categorie="invite">Valider comme invité</button> <button class="bouton" data-valider="${p.id}" data-categorie="titulaire">Comme titulaire</button></span></li>`).join('')}</ul>` : '<p class="vide">Aucun compte en attente.</p>'}</div>
       <div class="carte"><h2>Véhicules</h2><form id="form-vehicule" class="formulaire grille-2"><label>Nom<input name="nom" required></label><label>Places<input name="places_totales" type="number" min="1" required></label><button class="bouton principal">Ajouter</button></form>${etat.vehicules.map((v) => `<p>${echapper(v.nom)} — <input type="number" min="1" data-places-vehicule="${v.id}" value="${v.places_totales}"> places</p>`).join('')}</div>
       <div class="carte"><h2>Conducteurs et trajets</h2><ul class="liste">${etat.jours.map((j) => `<li>${echapper(dateLisible(j.date_service))} · ${echapper((Array.isArray(j.vehicules) ? j.vehicules[0] : j.vehicules)?.nom || 'Véhicule')}<label>Conducteur<select data-conducteur-jour="${j.id}"><option value="">À attribuer</option>${etat.conducteurs.map((c) => `<option value="${c.id}" ${c.id === j.conducteur_id ? 'selected' : ''}>${echapper(c.nom_affiche)}</option>`).join('')}</select></label></li>`).join('') || '<li>Aucun trajet généré.</li>'}</ul></div>
       <div class="carte"><h2>Destinations</h2><p class="doux">Un rang plus petit signifie une priorité plus élevée.</p><form id="form-destination" class="formulaire grille-2"><label>Nom<input name="nom" required></label><label>Priorité<input name="rang_priorite" type="number" min="0" value="100" required></label><button class="bouton principal">Ajouter</button></form><ul class="liste">${etat.destinations.map((d) => `<li>${echapper(d.nom)} <label>Priorité<input type="number" min="0" data-priorite-destination="${d.id}" value="${d.rang_priorite}"></label></li>`).join('')}</ul></div>
@@ -241,7 +242,12 @@
   }
   async function traiterFormulaire(formulaire) {
     const donnees = new FormData(formulaire);
-    if (formulaire.id === 'form-remarque') {
+    if (formulaire.id === 'form-planning') {
+      const { data: nombreTrajets, error: erreur } = await base.rpc('preparer_jours_service', { _date: donnees.get('date_service') });
+      if (erreur) throw erreur;
+      if (!nombreTrajets) afficherToast('Cette date n’est pas un jour ouvré configuré.', true);
+      else afficherToast(`Trajets préparés pour ${nombreTrajets} véhicule(s).`);
+    } else if (formulaire.id === 'form-remarque') {
       const jour = jourCourant();
       const { error: erreur } = await base.from('remarques_conducteur').insert({
         jour_service_id: jour.id, profil_id: etat.utilisateur.id, conducteur_id: donnees.get('conducteur_id'),
