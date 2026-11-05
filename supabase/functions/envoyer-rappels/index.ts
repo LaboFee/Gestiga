@@ -1,6 +1,20 @@
 // Envoie les rappels des jours de service aux titulaires et aux invites.
 import webpush from "npm:web-push@3.6.7";
-import { clientService, formaterDateLongue } from "../_partage/client.ts";
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const clientService = createClient(
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+);
+
+function formaterDateLongue(dateIso: string): string {
+  return new Date(`${dateIso}T00:00:00Z`).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  });
+}
 
 webpush.setVapidDetails(
   Deno.env.get("VAPID_SUJET")!,
