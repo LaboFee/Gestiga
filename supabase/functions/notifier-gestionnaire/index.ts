@@ -1,10 +1,27 @@
 // Envoie au gestionnaire unique le resume des mouvements sur les demandes.
+import { createClient } from "npm:@supabase/supabase-js@2";
+
+const clientService = createClient(
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+);
+const CLE_SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
 function echapperHtml(texte: string): string {
   return texte
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function formaterDateLongue(dateIso: string): string {
+  return new Date(`${dateIso}T00:00:00Z`).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  });
 }
 
 const CLE_RESEND = Deno.env.get("RESEND_API_KEY");
@@ -34,7 +51,11 @@ interface Evenement {
   survenu_le: string;
 }
 
-Deno.serve(async () => {
+Deno.serve(async (requete) => {
+  if (!CLE_SERVICE || requete.headers.get("authorization") !== `Bearer ${CLE_SERVICE}`) {
+    return new Response("Acces reserve aux taches planifiees.", { status: 401 });
+  }
+
   const { data: file, error: erreurFile } = await clientService
     .from("file_courriels")
     .update({ statut: "en_traitement" })
