@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gestiga</title>
+  <meta name="theme-color" content="#0b3a53">
+  <meta name="description" content="Gestion des places du véhicule de liaison">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icone-192.png">
+  <link rel="apple-touch-icon" href="icone-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="chargement" class="plein-ecran"><div class="spinner" aria-label="Chargement"></div></div>
+
+  <main id="connexion" class="plein-ecran" hidden>
+    <form id="form-connexion" class="carte-connexion" autocomplete="on">
+      <div class="logo-grand">G</div>
+      <h1>Gestiga</h1>
+      <p class="sous-titre">Réservez votre place dans le véhicule de liaison.</p>
+
+      <label id="champ-nom" hidden>Nom complet
+        <input type="text" name="nom" autocomplete="name" placeholder="Prénom Nom">
+      </label>
+      <label>Adresse e-mail
+        <input type="email" name="email" autocomplete="email" required placeholder="vous@exemple.fr">
+      </label>
+      <label>Mot de passe
+        <input type="password" name="mdp" autocomplete="current-password" required minlength="6" placeholder="6 caractères minimum">
+      </label>
+
+      <p id="erreur-connexion" class="erreur" role="alert" hidden></p>
+      <button type="submit" class="bouton principal large" id="btn-connexion">Se connecter</button>
+      <button type="button" class="bouton lien" id="btn-bascule">Pas de compte ? Créer un compte</button>
+    </form>
+  </main>
+
+  <div id="app" hidden>
+    <header class="entete">
+      <div class="marque"><span class="logo">G</span><span class="nom-app">Gestiga</span></div>
+      <div class="entete-droite">
+        <button class="bouton discret" id="btn-installer" hidden>Installer l’app</button>
+        <span class="utilisateur" id="utilisateur"></span>
+        <button class="bouton discret" id="btn-deconnexion">Se déconnecter</button>
+      </div>
+    </header>
+
+    <nav id="nav" class="nav" aria-label="Navigation principale"></nav>
+    <main id="vue" class="vue"></main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
