@@ -218,6 +218,9 @@ textarea { min-height: 110px; resize: vertical; }
 
 /* ---------- Gestion ---------- */
 .formulaire { display: grid; gap: .8rem; }
+.formulaire > .bouton {
+  justify-self: start; width: auto; min-width: 0; min-height: 40px; padding: .48rem .9rem;
+}
 .grille-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .8rem; }
 .tableau { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: .92rem; }
@@ -258,11 +261,12 @@ td select { min-width: 120px; padding: .45rem .5rem; }
   .nav {
     position: fixed; inset: auto 0 0; z-index: 30; width: 100%; gap: .2rem;
     padding: .35rem .35rem calc(.35rem + env(safe-area-inset-bottom, 0px));
-    border-bottom: 0; border-top: 1px solid var(--bord); box-shadow: 0 -5px 18px rgba(11, 58, 83, .1);
+    border-bottom: 0; border-top: 1px solid var(--bord); box-shadow: none;
+    background: var(--carte);
     overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
   }
   .nav::-webkit-scrollbar, .sous-nav::-webkit-scrollbar, .filtres-demandes::-webkit-scrollbar { display: none; }
-  .nav button { flex: 0 0 auto; padding: .58rem .72rem; font-size: .82rem; }
+  .nav button { flex: 0 0 auto; padding: .58rem .72rem; font-size: .82rem; border-radius: 10px; }
   .vue { gap: .8rem; }
   .carte { padding: 1rem; }
   .liste li { align-items: stretch; flex-direction: column; gap: .55rem; }
