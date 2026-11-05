@@ -398,9 +398,8 @@ set search_path = ''
 as $$
   select coalesce(
     (select rc.est_jour_service from public.regles_calendrier rc where rc.date_regle = _date),
-    extract(isodow from _date)::smallint = any(
-      (select pa.jours_ouvres from public.parametres_application pa where pa.instance_unique)
-    )
+    (select extract(isodow from _date)::smallint = any(pa.jours_ouvres)
+     from public.parametres_application pa where pa.instance_unique)
   );
 $$;
 
