@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#0b3a53">
   <meta name="description" content="Gestion des places du véhicule de liaison">
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="icone-192.png">
+  <link rel="icon" href="icone.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icone-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -22,13 +22,13 @@
       <p class="sous-titre">Réservez votre place dans le véhicule de liaison.</p>
 
       <label id="champ-nom" hidden>Nom complet
-        <input type="text" name="nom" autocomplete="name" placeholder="Prénom Nom">
+        <input type="text" name="nom_affiche" autocomplete="name" placeholder="Prénom Nom">
       </label>
       <label>Adresse e-mail
-        <input type="email" name="email" autocomplete="email" required placeholder="vous@exemple.fr">
+        <input type="email" name="courriel" autocomplete="email" required placeholder="vous@exemple.ci">
       </label>
       <label>Mot de passe
-        <input type="password" name="mdp" autocomplete="current-password" required minlength="6" placeholder="6 caractères minimum">
+        <input type="password" name="mot_de_passe" autocomplete="current-password" required minlength="6" placeholder="6 caractères minimum">
       </label>
 
       <p id="erreur-connexion" class="erreur" role="alert" hidden></p>
@@ -37,11 +37,21 @@
     </form>
   </main>
 
+  <main id="attente" class="plein-ecran" hidden>
+    <section class="carte-connexion">
+      <div class="logo-grand">G</div>
+      <h1>Inscription reçue</h1>
+      <p class="sous-titre">Le gestionnaire doit valider votre compte avant que vous puissiez utiliser Gestiga.</p>
+      <button type="button" class="bouton lien" id="btn-deconnexion-attente">Se déconnecter</button>
+    </section>
+  </main>
+
   <div id="app" hidden>
     <header class="entete">
       <div class="marque"><span class="logo">G</span><span class="nom-app">Gestiga</span></div>
       <div class="entete-droite">
         <button class="bouton discret" id="btn-installer" hidden>Installer l’app</button>
+        <button class="bouton discret" id="btn-rappels" hidden>Activer les rappels</button>
         <span class="utilisateur" id="utilisateur"></span>
         <button class="bouton discret" id="btn-deconnexion">Se déconnecter</button>
       </div>

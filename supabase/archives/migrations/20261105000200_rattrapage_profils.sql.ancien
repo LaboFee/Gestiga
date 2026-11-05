@@ -1,0 +1,10 @@
+-- Rattrapage : crée le profil et le rôle « passager » des comptes créés AVANT la migration
+-- initiale (le déclencheur d'inscription n'existait pas encore). Sans effet si tout est déjà en place.
+insert into profils (id, nom_complet)
+select u.id, coalesce(u.raw_user_meta_data->>'nom_complet', u.email)
+  from auth.users u
+on conflict (id) do nothing;
+
+insert into roles_utilisateurs (utilisateur_id, role)
+select p.id, 'passager' from profils p
+on conflict do nothing;

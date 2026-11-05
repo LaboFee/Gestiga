@@ -1,0 +1,55 @@
+-- =====================================================================
+-- Gestiga — tâches planifiées (pg_cron) et appels aux Edge Functions (pg_net)
+--
+-- Prérequis : stocker l'URL du projet et la clé de service dans le coffre (Vault) :
+--   select vault.create_secret('https://<ref>.supabase.co', 'url_projet');
+--   select vault.create_secret('<clé service_role>',        'cle_service');
+--
+-- Les horaires pg_cron sont en UTC : 12:05 et 16:05 ici. Adapter le décalage
+-- si votre fuseau horaire n'est pas UTC.
+-- =====================================================================
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+create function appeler_fonction_edge(p_nom text, p_corps jsonb default '{}')
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_url text := (select decrypted_secret from vault.decrypted_secrets where name = 'url_projet');
+  v_cle text := (select decrypted_secret from vault.decrypted_secrets where name = 'cle_service');
+begin
+  if v_url is null or v_cle is null then
+    raise warning 'Secrets url_projet / cle_service absents du coffre';
+    return;
+  end if;
+  perform net.http_post(
+    url     := v_url || '/functions/v1/' || p_nom,
+    headers := jsonb_build_object(
+                 'Content-Type',  'application/json',
+                 'Authorization', 'Bearer ' || v_cle),
+    body    := p_corps);
+end $$;
+
+revoke all on function appeler_fonction_edge(text, jsonb) from public, anon, authenticated;
+
+-- Mail au gestionnaire dès qu'un mouvement est enregistré
+create function declencher_notification_gestionnaire() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform appeler_fonction_edge('notifier-gestionnaire');
+  return null;
+end $$;
+
+create trigger apres_evenement_gestionnaire
+  after insert on evenements_gestionnaire
+  for each statement execute function declencher_notification_gestionnaire();
+
+-- Génération des demandes automatiques des titulaires (chaque jour ouvré, 00:05)
+select cron.schedule('gestiga-generation-demandes', '5 0 * * 1-5',
+  $$ select generer_demandes_quotidiennes(); $$);
+
+-- Rappels 12:05 et 16:05 (jours ouvrés)
+select cron.schedule('gestiga-rappel-midi', '5 12 * * 1-5',
+  $$ select appeler_fonction_edge('envoyer-rappels', '{"creneau":"midi"}'::jsonb); $$);
+select cron.schedule('gestiga-rappel-soir', '5 16 * * 1-5',
+  $$ select appeler_fonction_edge('envoyer-rappels', '{"creneau":"soir"}'::jsonb); $$);

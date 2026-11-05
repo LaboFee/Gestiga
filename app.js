@@ -1,623 +1,351 @@
 (() => {
   'use strict';
-
-  /* ================= Utilitaires ================= */
-  const $ = (sel, racine = document) => racine.querySelector(sel);
+  const choisir = (s, r = document) => r.querySelector(s);
   const echapper = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const iso = (d) => d.toLocaleDateString('sv-SE');
-
-  function joursOuvres(n = 5) {
-    const liste = [];
-    const d = new Date();
-    while (liste.length < n) {
-      const j = d.getDay();
-      if (j !== 0 && j !== 6) liste.push(iso(d));
-      d.setDate(d.getDate() + 1);
-    }
-    return liste;
-  }
-  const dateDe = (jour) => new Date(jour + 'T12:00:00');
-  const libelleCourt = (jour) => dateDe(jour).toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '');
-  const libelleLong = (jour) => dateDe(jour).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-  const numeroJour = (jour) => dateDe(jour).getDate();
-
+  const dateAbidjan = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Abidjan' }).format(d);
+  const dateLisible = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
   let minuteurToast;
   function afficherToast(message, erreur = false) {
-    const t = $('#toast');
-    t.textContent = message;
-    t.classList.toggle('erreur-toast', erreur);
-    t.classList.add('visible');
-    clearTimeout(minuteurToast);
-    minuteurToast = setTimeout(() => t.classList.remove('visible'), 2800);
+    const toast = choisir('#toast'); toast.textContent = message;
+    toast.classList.toggle('erreur-toast', erreur); toast.classList.add('visible');
+    clearTimeout(minuteurToast); minuteurToast = setTimeout(() => toast.classList.remove('visible'), 3000);
   }
+  const configurationValide = window.CONFIG?.SUPABASE_URL && window.CONFIG?.SUPABASE_CLE
+    && !window.CONFIG.SUPABASE_URL.includes('VOTRE-PROJET') && !window.CONFIG.SUPABASE_CLE.includes('VOTRE-CLE');
+  const base = configurationValide ? window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_CLE) : null;
+  const etat = { utilisateur: null, profil: null, profils: [], roles: [], tousRoles: [], passagers: [], destinations: [],
+    destinationsDefaut: [], vehicules: [], jours: [], destinationsJour: [], demandes: [], remarques: [], conducteurs: [],
+    parametres: null, disponibilite: null, jourId: null, onglet: 'demandes', modeInscription: false };
+  const resultat = async (requete) => { const reponse = await requete; if (reponse.error) throw reponse.error; return reponse.data; };
+  const gestionnaire = () => etat.roles.includes('gestionnaire');
+  const conducteur = () => etat.roles.includes('conducteur');
+  const profilActif = () => etat.profil?.statut_compte === 'actif';
+  const passagerActif = () => etat.passagers.some((p) => p.profil_id === etat.utilisateur?.id && p.est_actif);
+  const nomPassager = (id) => etat.profils.find((p) => p.id === id)?.nom_affiche || 'Passager';
+  const nomDestination = (id) => etat.destinations.find((d) => d.id === id)?.nom || 'Destination';
+  const jourCourant = () => etat.jours.find((j) => j.id === etat.jourId) || null;
+  const demandePerso = () => etat.demandes.find((d) => d.profil_id === etat.utilisateur?.id && d.jour_service_id === etat.jourId) || null;
+  function afficherEcran(nom) { ['chargement', 'connexion', 'attente', 'app'].forEach((id) => { choisir(`#${id}`).hidden = id !== nom; }); }
 
-  /* ================= Supabase ================= */
-  const configOk = window.CONFIG && CONFIG.SUPABASE_URL && !CONFIG.SUPABASE_URL.includes('VOTRE-PROJET');
-  const bd = configOk ? window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_CLE) : null;
-
-  /* ================= État ================= */
-  const etat = {
-    idUtilisateur: null,
-    profil: null,
-    profils: [],
-    destinations: [],
-    parametres: { places_total: 8, statut: '' },
-    demandes: [],
-    remarques: [],
-    jours: joursOuvres(5),
-    jour: null,
-    onglet: 'demandes',
-    modeInscription: false,
-  };
-  etat.jour = etat.jours[0];
-
-  const estGestionnaire = () => etat.profil?.role === 'gestionnaire';
-  const estConducteur = () => etat.profil?.role === 'conducteur';
-  const nomAffiche = (p) => p.nom || p.email || 'Sans nom';
-
-  /* ================= Chargement des données ================= */
-  async function chargerTout() {
-    const [p, d, pa, de] = await Promise.all([
-      bd.from('profils').select('*').order('nom'),
-      bd.from('destinations').select('*').order('priorite'),
-      bd.from('parametres').select('*').eq('id', 1).single(),
-      bd.from('demandes').select('*').in('jour', etat.jours),
+  async function chargerDonnees() {
+    const [parametres, profils, roles, passagers, destinations, destinationsDefaut, vehicules, jours] = await Promise.all([
+      resultat(base.from('parametres_application').select('*').eq('instance_unique', true).single()),
+      resultat(base.from('profils').select('id,nom_affiche,courriel,statut_compte').order('nom_affiche')),
+      resultat(base.from('roles_utilisateur').select('profil_id,role')),
+      resultat(base.from('passagers').select('*')),
+      resultat(base.from('destinations').select('*').order('rang_priorite')),
+      resultat(base.from('destinations_par_defaut_passager').select('*')),
+      resultat(base.from('vehicules').select('*').eq('est_actif', true).order('nom')),
+      resultat(base.from('jours_service').select('id,date_service,vehicule_id,conducteur_id,statut,vehicules(nom,places_totales)')
+        .gte('date_service', dateAbidjan(new Date())).order('date_service').limit(30)),
     ]);
-    const echec = [p, d, pa, de].find((r) => r.error);
-    if (echec) throw echec.error;
-    etat.profils = p.data;
-    etat.destinations = d.data;
-    etat.parametres = pa.data;
-    etat.demandes = de.data;
-    etat.profil = etat.profils.find((x) => x.id === etat.idUtilisateur) || null;
+    etat.parametres = parametres; etat.profils = profils || []; etat.tousRoles = roles || [];
+    etat.roles = etat.tousRoles.filter((r) => r.profil_id === etat.utilisateur.id).map((r) => r.role);
+    etat.passagers = passagers || []; etat.destinations = destinations || [];
+    etat.destinationsDefaut = destinationsDefaut || []; etat.vehicules = vehicules || [];
+    etat.jours = (jours || []).filter((j) => j.statut === 'planifie');
+    etat.profil = etat.profils.find((p) => p.id === etat.utilisateur.id) || null;
+    if (!etat.jours.some((j) => j.id === etat.jourId)) etat.jourId = etat.jours[0]?.id || null;
+    etat.conducteurs = await resultat(base.rpc('lister_conducteurs')) || [];
+    if (etat.jours.length) {
+      const ids = etat.jours.map((j) => j.id);
+      [etat.destinationsJour, etat.demandes] = await Promise.all([
+        resultat(base.from('destinations_jour_service').select('*').in('jour_service_id', ids)),
+        resultat(base.from('demandes_transport').select('*').in('jour_service_id', ids)),
+      ]);
+    } else { etat.destinationsJour = []; etat.demandes = []; }
+    if (!gestionnaire() && etat.roles.includes('conducteur') && etat.jourId
+      && etat.jours.find((j) => j.id === etat.jourId)?.conducteur_id === etat.utilisateur.id) {
+      const manifeste = await resultat(base.rpc('obtenir_manifeste', { _jour_service_id: etat.jourId }));
+      etat.profils = [...etat.profils, ...(manifeste || []).map((p) => ({ id: p.profil_id, nom_affiche: p.nom_affiche }))];
+    }
+    if (etat.jourId && profilActif()) {
+      const dispo = await resultat(base.rpc('obtenir_disponibilite', { _jour_service_id: etat.jourId }));
+      etat.disponibilite = Array.isArray(dispo) ? dispo[0] : dispo;
+    } else etat.disponibilite = null;
+    if (gestionnaire() && etat.onglet === 'remarques') etat.remarques = await resultat(base.from('remarques_conducteur').select('*').order('cree_le', { ascending: false }).limit(200)) || [];
   }
 
-  async function rechargerDemandes() {
-    const { data, error } = await bd.from('demandes').select('*').in('jour', etat.jours);
-    if (!error) { etat.demandes = data; rendre(); }
-  }
-
-  async function chargerRemarques() {
-    if (!estGestionnaire()) return;
-    const { data, error } = await bd.from('remarques').select('note, contenu, cree_le').order('cree_le', { ascending: false }).limit(200);
-    if (!error) etat.remarques = data;
-  }
-
-  /* ================= Calcul des places ================= */
-  function calculerJour(jour) {
-    const parProfil = new Map(etat.demandes.filter((d) => d.jour === jour).map((d) => [d.profil_id, d]));
-    const liste = etat.profils
-      .filter((p) => p.actif && p.role !== 'conducteur')
-      .map((p) => {
-        const d = parProfil.get(p.id);
-        const titulaire = p.statut === 'titulaire';
-        const active = d ? d.active : titulaire; // titulaire : demande automatique
-        const destination_id = d?.destination_id ?? p.destination_id ?? null;
-        return { profil: p, titulaire, active, destination_id, accepte: false };
-      });
-
-    const titulaires = liste.filter((x) => x.active && x.titulaire);
-    titulaires.forEach((x) => (x.accepte = true));
-    let restantes = Math.max(0, etat.parametres.places_total - titulaires.length);
-
-    const invites = liste.filter((x) => x.active && !x.titulaire).sort((a, b) => a.profil.priorite - b.profil.priorite);
-    let invitesAcceptes = 0;
-    invites.forEach((x) => {
-      if (restantes > 0) { x.accepte = true; restantes--; invitesAcceptes++; }
-    });
-
-    return {
-      liste,
-      total: etat.parametres.places_total,
-      nbTitulaires: titulaires.length,
-      nbInvites: invitesAcceptes,
-      libres: restantes,
-    };
-  }
-
-  /* ================= Vues ================= */
   function selecteurJour() {
-    return `<div class="jours" role="group" aria-label="Choisir le jour">${etat.jours
-      .map((j) => `<button class="jour" data-jour="${j}" aria-pressed="${j === etat.jour}"><small>${libelleCourt(j)}</small><strong>${numeroJour(j)}</strong></button>`)
-      .join('')}</div>`;
+    if (!etat.jours.length) return '<div class="carte"><p class="vide">Aucun trajet programmé pour le moment. Contactez le gestionnaire.</p></div>';
+    return `<label class="carte formulaire">Journée et véhicule<select id="choix-jour">${etat.jours.map((j) => {
+      const v = Array.isArray(j.vehicules) ? j.vehicules[0] : j.vehicules;
+      return `<option value="${j.id}" ${j.id === etat.jourId ? 'selected' : ''}>${echapper(dateLisible(j.date_service))} · ${echapper(v?.nom || 'Véhicule')}</option>`;
+    }).join('')}</select></label>`;
   }
-
+  function demandesEnAttente() {
+    const demandes = etat.demandes.filter((d) => d.statut === 'en_attente').sort((a, b) => {
+      const pa = etat.passagers.find((p) => p.profil_id === a.profil_id);
+      const pb = etat.passagers.find((p) => p.profil_id === b.profil_id);
+      const da = etat.destinations.find((d) => d.id === a.destination_id);
+      const db = etat.destinations.find((d) => d.id === b.destination_id);
+      return (pa?.rang_priorite ?? 100) - (pb?.rang_priorite ?? 100) || (da?.rang_priorite ?? 100) - (db?.rang_priorite ?? 100);
+    });
+    return `<div class="carte"><h2>Demandes à décider</h2>${demandes.length ? `<ul class="liste">${demandes.map((d) => {
+      const p = etat.passagers.find((x) => x.profil_id === d.profil_id);
+      return `<li><span>${echapper(nomPassager(d.profil_id))} · ${echapper(p?.categorie || 'invité')} · ${echapper(nomDestination(d.destination_id))} · priorité ${p?.rang_priorite ?? '—'}</span><span><button class="bouton principal" data-decision="acceptee" data-demande="${d.id}">Accepter</button> <button class="bouton danger" data-decision="refusee" data-demande="${d.id}">Refuser</button></span></li>`;
+    }).join('')}</ul>` : '<p class="vide">Aucune demande en attente.</p>'}</div>`;
+  }
   function vueDemandes() {
-    const c = calculerJour(etat.jour);
-    const moi = c.liste.find((x) => x.profil.id === etat.profil.id);
-    const sieges = Array.from({ length: c.total }, (_, i) => {
-      const classe = i < c.nbTitulaires ? 'titulaire' : i < c.nbTitulaires + c.nbInvites ? 'invite' : '';
-      return `<span class="siege ${classe}"></span>`;
-    }).join('');
-
-    let blocMoi = '<div class="carte"><p class="vide">Votre profil est désactivé. Contactez le gestionnaire.</p></div>';
-    if (moi) {
-      let badge, texte;
-      if (!moi.active) { badge = '<span class="badge">Désactivée</span>'; texte = moi.titulaire ? 'Votre place est libérée pour ce jour.' : 'Activez pour demander une place.'; }
-      else if (moi.titulaire) { badge = '<span class="badge ok">Place garantie</span>'; texte = 'Décochez pour libérer votre place.'; }
-      else if (moi.accepte) { badge = '<span class="badge ok">Acceptée</span>'; texte = 'Votre place est confirmée.'; }
-      else { badge = '<span class="badge attente">En attente</span>'; texte = 'Vous serez accepté si une place se libère.'; }
-
-      blocMoi = `
-        <div class="carte">
-          <div class="statut-moi">
-            <div>
-              <h2>${moi.titulaire ? 'Je voyage ce jour-là' : 'Je demande une place'}</h2>
-              <p class="doux">${texte}</p>
-            </div>
-            <label class="interrupteur" aria-label="Ma demande pour ${libelleLong(etat.jour)}">
-              <input type="checkbox" id="chk-demande" ${moi.active ? 'checked' : ''}><span></span>
-            </label>
-          </div>
-          <div>${badge}</div>
-          <label class="formulaire">Destination
-            <select id="sel-destination">
-              <option value="">— À préciser —</option>
-              ${etat.destinations.map((d) => `<option value="${d.id}" ${d.id === moi.destination_id ? 'selected' : ''}>${echapper(d.nom)}</option>`).join('')}
-            </select>
-          </label>
-        </div>`;
-    }
-
-    const actifs = c.liste
-      .filter((x) => x.active)
-      .sort((a, b) => (b.accepte - a.accepte) || (b.titulaire - a.titulaire) || (a.profil.priorite - b.profil.priorite));
-
-    return `
-      ${selecteurJour()}
-      <div class="carte vehicule">
-        <div class="rangee">
-          <div>
-            <div class="chiffre-places">${c.libres}<span>place${c.libres > 1 ? 's' : ''} libre${c.libres > 1 ? 's' : ''} sur ${c.total}</span></div>
-            <p class="doux" style="margin-top:.35rem">${echapper(libelleLong(etat.jour))}${etat.parametres.statut ? ' · ' + echapper(etat.parametres.statut) : ''}</p>
-          </div>
-        </div>
-        <div class="sieges" aria-hidden="true">${sieges}</div>
-        <div class="legende">
-          <span><i style="background:var(--petrole)"></i>Titulaires (${c.nbTitulaires})</span>
-          <span><i style="background:var(--signal)"></i>Invités (${c.nbInvites})</span>
-          <span><i style="border:2px dashed var(--bord)"></i>Libres</span>
-        </div>
-      </div>
-      ${blocMoi}
-      <div class="carte">
-        <h3>Passagers du jour</h3>
-        ${actifs.length ? `<ul class="liste">${actifs.map((x) => `
-          <li>
-            <div>${echapper(nomAffiche(x.profil))}<div class="sous">${echapper(nomDestination(x.destination_id))}</div></div>
-            <span>${x.titulaire ? '<span class="badge titulaire">Titulaire</span>' : x.accepte ? '<span class="badge ok">Invité accepté</span>' : '<span class="badge attente">En attente</span>'}</span>
-          </li>`).join('')}</ul>` : '<p class="vide">Aucune demande pour ce jour.</p>'}
-      </div>`;
+    const jour = jourCourant(); if (!jour) return selecteurJour();
+    const vehicule = Array.isArray(jour.vehicules) ? jour.vehicules[0] : jour.vehicules;
+    const demande = demandePerso(); const demandeActive = demande && !['annule', 'refusee'].includes(demande.statut);
+    const destinations = etat.destinationsJour.filter((x) => x.jour_service_id === jour.id).sort((a,b) => a.rang_priorite-b.rang_priorite);
+    const etats = { acceptee: 'Place confirmée', en_attente: 'En attente de décision du gestionnaire', refusee: 'Demande refusée', annule: 'Demande désactivée' };
+    return `${selecteurJour()}<div class="carte vehicule"><div class="chiffre-places">${etat.disponibilite?.places_libres ?? vehicule?.places_totales ?? 0}<span> place(s) disponible(s) sur ${vehicule?.places_totales ?? 0}</span></div><p class="doux">${echapper(dateLisible(jour.date_service))} · ${echapper(vehicule?.nom || 'Véhicule')}</p></div>
+      <div class="carte"><h2>Ma demande</h2><p class="doux">${demande ? etats[demande.statut] || demande.statut : 'Aucune demande enregistrée.'}</p>
+      ${passagerActif() ? `<label class="formulaire">Destination<select id="choix-destination" ${destinations.length ? '' : 'disabled'}>${destinations.map((d) => `<option value="${d.destination_id}" ${d.destination_id === demande?.destination_id ? 'selected' : ''}>${echapper(nomDestination(d.destination_id))}</option>`).join('')}</select></label><label class="interrupteur"><input type="checkbox" id="demande-active" ${demandeActive ? 'checked' : ''} ${destinations.length ? '' : 'disabled'}><span></span></label>` : '<p class="erreur">Votre compte attend la validation du gestionnaire.</p>'}</div>
+      ${passagerActif() ? `<label class="formulaire">Mes destinations habituelles<select multiple data-destinations-profil="${etat.utilisateur.id}">${etat.destinations.map((d) => `<option value="${d.id}" ${etat.destinationsDefaut.some((x) => x.profil_id === etat.utilisateur.id && x.destination_id === d.id) ? 'selected' : ''}>${echapper(d.nom)}</option>`).join('')}</select></label>` : ''}
+      ${gestionnaire() ? demandesEnAttente() : ''}`;
   }
-
-  function nomDestination(id) {
-    return etat.destinations.find((d) => d.id === id)?.nom || 'Destination à préciser';
-  }
-
   function vueTrajet() {
-    const c = calculerJour(etat.jour);
-    const acceptes = c.liste.filter((x) => x.active && x.accepte);
-    const groupes = [...etat.destinations, { id: null, nom: 'Destination à préciser' }]
-      .map((d) => ({
-        destination: d,
-        passagers: acceptes
-          .filter((x) => x.destination_id === d.id)
-          .sort((a, b) => (b.titulaire - a.titulaire) || (a.profil.priorite - b.profil.priorite)),
-      }))
-      .filter((g) => g.passagers.length);
-
-    return `
-      ${selecteurJour()}
-      <div class="carte">
-        <h2>Trajet du ${echapper(libelleLong(etat.jour))}</h2>
-        <p class="doux">${acceptes.length} passager${acceptes.length > 1 ? 's' : ''} sur ${c.total} places.</p>
-      </div>
-      ${groupes.length ? groupes.map((g) => `
-        <div class="carte">
-          <h3>${echapper(g.destination.nom)}</h3>
-          <ul class="liste">${g.passagers.map((x) => `
-            <li><span>${echapper(nomAffiche(x.profil))}</span>
-            ${x.titulaire ? '<span class="badge titulaire">Titulaire</span>' : '<span class="badge">Invité</span>'}</li>`).join('')}
-          </ul>
-        </div>`).join('') : '<div class="carte"><p class="vide">Aucun passager accepté pour ce jour.</p></div>'}`;
+    const jour = jourCourant(); if (!jour) return selecteurJour();
+    if (!conducteur() && !gestionnaire()) return '<div class="carte"><p class="vide">Le manifeste est réservé au conducteur et au gestionnaire.</p></div>';
+    const admises = etat.demandes.filter((d) => d.jour_service_id === jour.id && d.statut === 'acceptee');
+    const destinations = etat.destinationsJour.filter((d) => d.jour_service_id === jour.id).sort((a,b) => a.rang_priorite-b.rang_priorite);
+    return `${selecteurJour()}<div class="carte"><h2>Manifeste du ${echapper(dateLisible(jour.date_service))}</h2>${destinations.map((destination) => {
+      const liste = admises.filter((d) => d.destination_id === destination.destination_id);
+      return liste.length ? `<h3>${echapper(nomDestination(destination.destination_id))}</h3><ul class="liste">${liste.map((d) => `<li>${echapper(nomPassager(d.profil_id))}</li>`).join('')}</ul>` : '';
+    }).join('') || '<p class="vide">Aucun passager confirmé.</p>'}</div>`;
   }
-
   function vueRemarques() {
-    const formulaire = `
-      <form class="carte formulaire" id="form-remarque">
-        <h2>Une remarque sur la conduite ?</h2>
-        <p class="doux">Votre message est lu par le gestionnaire uniquement. Le conducteur n’y a pas accès.</p>
-        <div>
-          <div class="doux" style="margin-bottom:.3rem">Votre ressenti</div>
-          <div class="etoiles" id="etoiles" role="radiogroup" aria-label="Note de 1 à 5">
-            ${[1, 2, 3, 4, 5].map((n) => `<input type="radio" name="note" id="note${n}" value="${n}"><label for="note${n}" data-n="${n}" title="${n} sur 5">★</label>`).join('')}
-          </div>
-        </div>
-        <label>Votre remarque
-          <textarea name="contenu" required placeholder="Ce qui s’est bien passé, ce qui pourrait être amélioré…"></textarea>
-        </label>
-        <button class="bouton principal" type="submit">Envoyer la remarque</button>
-      </form>`;
-
-    let synthese = '';
-    if (estGestionnaire()) {
-      const r = etat.remarques;
-      const notees = r.filter((x) => x.note);
-      const moyenne = notees.length ? (notees.reduce((s, x) => s + x.note, 0) / notees.length).toFixed(1) : '–';
-      const repartition = [5, 4, 3, 2, 1].map((n) => {
-        const nb = notees.filter((x) => x.note === n).length;
-        const pct = notees.length ? Math.round((nb / notees.length) * 100) : 0;
-        return `<div class="ligne-note"><span>${n} ★</span><div class="barre"><div style="width:${pct}%"></div></div><span>${nb}</span></div>`;
-      }).join('');
-      synthese = `
-        <div class="carte">
-          <h2>Synthèse des remarques</h2>
-          <div class="rangee"><div class="chiffre-places">${moyenne}<span>/ 5 · ${r.length} remarque${r.length > 1 ? 's' : ''}</span></div></div>
-          <div style="display:grid;gap:.4rem">${repartition}</div>
-        </div>
-        <div class="carte">
-          <h3>Dernières remarques (anonymes)</h3>
-          ${r.length ? r.slice(0, 30).map((x) => `
-            <div class="remarque">
-              <div class="doux">${new Date(x.cree_le).toLocaleDateString('fr-FR')}${x.note ? ' · ' + '★'.repeat(x.note) : ''}</div>
-              <p>${echapper(x.contenu)}</p>
-            </div>`).join('') : '<p class="vide">Aucune remarque pour le moment.</p>'}
-        </div>`;
+    const jour = jourCourant();
+    const conducteurAffecte = etat.conducteurs.find((c) => c.id === jour?.conducteur_id);
+    const formulaire = !conducteur() && jour ? `<form class="carte formulaire" id="form-remarque"><h2>Remarque sur la conduite</h2><p class="doux">Le gestionnaire verra votre nom. Le conducteur ne verra pas cette remarque.</p>
+      <label>Conducteur affecté<select name="conducteur_id" required ${conducteurAffecte ? '' : 'disabled'}>${conducteurAffecte ? `<option value="${conducteurAffecte.id}">${echapper(conducteurAffecte.nom_affiche)}</option>` : ''}</select></label>
+      <label>Note<select name="note"><option value="">Sans note</option>${[1,2,3,4,5].map((n) => `<option value="${n}">${n} / 5</option>`).join('')}</select></label><label>Remarque<textarea name="texte" required minlength="3"></textarea></label>
+      <button class="bouton principal" type="submit" ${conducteurAffecte ? '' : 'disabled'}>Envoyer</button></form>` : '';
+    const synthese = new Map();
+    for (const remarque of etat.remarques) {
+      const groupe = synthese.get(remarque.conducteur_id) || { total: 0, sommeNotes: 0, nombreNotes: 0 };
+      groupe.total++;
+      if (remarque.note) { groupe.sommeNotes += remarque.note; groupe.nombreNotes++; }
+      synthese.set(remarque.conducteur_id, groupe);
     }
-    return formulaire + synthese;
+    const resume = [...synthese].map(([id, groupe]) => `<li><strong>${echapper(nomPassager(id))}</strong> · ${groupe.total} remarque(s)${groupe.nombreNotes ? ` · moyenne ${ (groupe.sommeNotes / groupe.nombreNotes).toFixed(1)}/5` : ''}</li>`).join('');
+    const liste = gestionnaire() ? `<div class="carte"><h2>Synthèse des remarques</h2>${resume ? `<ul class="liste">${resume}</ul>` : '<p class="vide">Aucune remarque.</p>'}${etat.remarques.map((r) => `<article class="remarque"><p class="doux">${echapper(nomPassager(r.profil_id))} · ${echapper(nomPassager(r.conducteur_id))} · ${new Date(r.cree_le).toLocaleDateString('fr-FR')}${r.note ? ` · ${r.note}/5` : ''}</p><p>${echapper(r.texte)}</p></article>`).join('')}</div>` : '';
+    return `${selecteurJour()}${formulaire}${liste}`;
   }
-
   function vueGestion() {
-    const optionsDest = (sel) => `<option value="">—</option>` + etat.destinations.map((d) => `<option value="${d.id}" ${d.id === sel ? 'selected' : ''}>${echapper(d.nom)}</option>`).join('');
-    return `
-      <form class="carte formulaire" id="form-params">
-        <h2>Véhicule</h2>
-        <div class="grille-2">
-          <label>Nombre de places total
-            <input type="number" name="places_total" min="1" max="60" value="${etat.parametres.places_total}" required>
-          </label>
-          <label>Statut du véhicule
-            <input type="text" name="statut" value="${echapper(etat.parametres.statut)}" placeholder="Ex. : Disponible">
-          </label>
-        </div>
-        <button class="bouton principal" type="submit">Enregistrer</button>
-      </form>
-
-      <div class="carte">
-        <h2>Destinations</h2>
-        <p class="doux">Plus le chiffre de priorité est petit, plus la destination passe en premier.</p>
-        ${etat.destinations.length ? `<ul class="liste">${etat.destinations.map((d) => `
-          <li>
-            <span>${echapper(d.nom)}</span>
-            <span style="display:flex;gap:.5rem;align-items:center">
-              <input type="number" style="width:78px" aria-label="Priorité de ${echapper(d.nom)}" data-dest-prio="${d.id}" value="${d.priorite}">
-              <button class="bouton danger" data-sup-dest="${d.id}">Supprimer</button>
-            </span>
-          </li>`).join('')}</ul>` : '<p class="vide">Aucune destination. Ajoutez la première ci-dessous.</p>'}
-        <form class="formulaire" id="form-dest">
-          <div class="grille-2">
-            <label>Nom de la destination<input type="text" name="nom" required></label>
-            <label>Priorité<input type="number" name="priorite" value="${(etat.destinations.at(-1)?.priorite ?? 0) + 10}" required></label>
-          </div>
-          <button class="bouton signal" type="submit">Ajouter la destination</button>
-        </form>
-      </div>
-
-      <div class="carte">
-        <h2>Membres</h2>
-        <p class="doux">Les titulaires sont acceptés d’office. Pour les invités, la priorité la plus basse passe en premier.</p>
-        <div class="tableau">
-          <table>
-            <thead><tr><th>Nom</th><th>Rôle</th><th>Statut</th><th>Priorité</th><th>Destination habituelle</th><th>Actif</th></tr></thead>
-            <tbody>
-              ${etat.profils.map((p) => `
-                <tr data-membre="${p.id}">
-                  <td>${echapper(nomAffiche(p))}<div class="doux">${echapper(p.email || '')}</div></td>
-                  <td><select data-champ="role">
-                    ${['passager', 'conducteur', 'gestionnaire'].map((r) => `<option value="${r}" ${p.role === r ? 'selected' : ''}>${r[0].toUpperCase() + r.slice(1)}</option>`).join('')}
-                  </select></td>
-                  <td><select data-champ="statut">
-                    <option value="titulaire" ${p.statut === 'titulaire' ? 'selected' : ''}>Titulaire</option>
-                    <option value="invite" ${p.statut === 'invite' ? 'selected' : ''}>Invité</option>
-                  </select></td>
-                  <td><input type="number" data-champ="priorite" value="${p.priorite}"></td>
-                  <td><select data-champ="destination_id">${optionsDest(p.destination_id)}</select></td>
-                  <td><input type="checkbox" data-champ="actif" ${p.actif ? 'checked' : ''} style="width:auto"></td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      </div>`;
+    const enAttente = etat.profils.filter((p) => p.statut_compte === 'en_attente');
+    return `<div class="carte"><h2>Comptes à valider</h2>${enAttente.length ? `<ul class="liste">${enAttente.map((p) => `<li>${echapper(p.nom_affiche || p.courriel || 'Nouveau compte')} · ${echapper(p.courriel || '')}<span><button class="bouton principal" data-valider="${p.id}" data-categorie="invite">Valider comme invité</button> <button class="bouton" data-valider="${p.id}" data-categorie="titulaire">Comme titulaire</button></span></li>`).join('')}</ul>` : '<p class="vide">Aucun compte en attente.</p>'}</div>
+      <div class="carte"><h2>Véhicules</h2><form id="form-vehicule" class="formulaire grille-2"><label>Nom<input name="nom" required></label><label>Places<input name="places_totales" type="number" min="1" required></label><button class="bouton principal">Ajouter</button></form>${etat.vehicules.map((v) => `<p>${echapper(v.nom)} — <input type="number" min="1" data-places-vehicule="${v.id}" value="${v.places_totales}"> places</p>`).join('')}</div>
+      <div class="carte"><h2>Conducteurs et trajets</h2><ul class="liste">${etat.jours.map((j) => `<li>${echapper(dateLisible(j.date_service))} · ${echapper((Array.isArray(j.vehicules) ? j.vehicules[0] : j.vehicules)?.nom || 'Véhicule')}<label>Conducteur<select data-conducteur-jour="${j.id}"><option value="">À attribuer</option>${etat.conducteurs.map((c) => `<option value="${c.id}" ${c.id === j.conducteur_id ? 'selected' : ''}>${echapper(c.nom_affiche)}</option>`).join('')}</select></label></li>`).join('') || '<li>Aucun trajet généré.</li>'}</ul></div>
+      <div class="carte"><h2>Destinations</h2><p class="doux">Un rang plus petit signifie une priorité plus élevée.</p><form id="form-destination" class="formulaire grille-2"><label>Nom<input name="nom" required></label><label>Priorité<input name="rang_priorite" type="number" min="0" value="100" required></label><button class="bouton principal">Ajouter</button></form><ul class="liste">${etat.destinations.map((d) => `<li>${echapper(d.nom)} <label>Priorité<input type="number" min="0" data-priorite-destination="${d.id}" value="${d.rang_priorite}"></label></li>`).join('')}</ul></div>
+      <div class="carte"><h2>Paramètres</h2><form id="form-parametres" class="formulaire grille-2"><label>Adresse du gestionnaire<input type="email" name="courriel_gestionnaire" value="${echapper(etat.parametres?.courriel_gestionnaire || '')}" required></label><label>Heure limite<input type="time" name="heure_limite_demande" value="${etat.parametres?.heure_limite_demande || '16:30'}" required></label><button class="bouton principal">Enregistrer</button></form></div>
+      <div class="carte"><h2>Passagers</h2><ul class="liste">${etat.passagers.map((p) => `<li>${echapper(nomPassager(p.profil_id))} · ${echapper(p.categorie)} <label>Priorité<input type="number" min="0" data-priorite-passager="${p.profil_id}" value="${p.rang_priorite}"></label><label>Conducteur<input type="checkbox" data-role-conducteur="${p.profil_id}" ${etat.tousRoles.some((r) => r.profil_id === p.profil_id && r.role === 'conducteur') ? 'checked' : ''}></label><label>Destinations habituelles<select multiple data-destinations-profil="${p.profil_id}">${etat.destinations.map((d) => `<option value="${d.id}" ${etat.destinationsDefaut.some((x) => x.profil_id === p.profil_id && x.destination_id === d.id) ? 'selected' : ''}>${echapper(d.nom)}</option>`).join('')}</select></label><label>Actif<input type="checkbox" data-passager-actif="${p.profil_id}" ${p.est_actif ? 'checked' : ''}></label></li>`).join('')}</ul></div>`;
   }
-
-  /* ================= Rendu ================= */
-  function onglets() {
-    const liste = [];
-    if (!estConducteur()) liste.push(['demandes', 'Ma demande']);
-    if (estConducteur() || estGestionnaire()) liste.push(['trajet', 'Trajet']);
-    if (!estConducteur()) liste.push(['remarques', 'Remarques']);
-    if (estGestionnaire()) liste.push(['gestion', 'Gestion']);
-    return liste;
+  function ongletsDisponibles() {
+    if (!profilActif()) return [];
+    const onglets = [];
+    if (passagerActif() && !conducteur()) onglets.push(['demandes', 'Ma demande']);
+    if (conducteur() || gestionnaire()) onglets.push(['trajet', 'Manifeste']);
+    if (!conducteur()) onglets.push(['remarques', 'Remarques']);
+    if (gestionnaire()) onglets.push(['gestion', 'Gestion']);
+    return onglets;
   }
-
   function rendre() {
     if (!etat.profil) return;
-    const liste = onglets();
-    if (!liste.some(([id]) => id === etat.onglet)) etat.onglet = liste[0][0];
-
-    $('#utilisateur').textContent = nomAffiche(etat.profil);
-    $('#nav').innerHTML = liste.map(([id, nom]) => `<button data-onglet="${id}" ${id === etat.onglet ? 'aria-current="page"' : ''}>${nom}</button>`).join('');
-
-    const vues = { demandes: vueDemandes, trajet: vueTrajet, remarques: vueRemarques, gestion: vueGestion };
-    const zone = $('#vue');
-    // Conserve le focus/scroll lors des rechargements temps réel
-    const defilement = window.scrollY;
-    zone.innerHTML = vues[etat.onglet]();
-    window.scrollTo(0, defilement);
+    afficherEcran('app'); choisir('#utilisateur').textContent = etat.profil.nom_affiche || etat.profil.courriel || 'Gestiga';
+    choisir('#btn-rappels').hidden = !profilActif();
+    if (!profilActif()) {
+      choisir('#nav').innerHTML = '';
+      choisir('#vue').innerHTML = '<div class="carte"><h1>Compte en attente</h1><p>Le gestionnaire doit valider votre inscription.</p></div>';
+      return;
+    }
+    const onglets = ongletsDisponibles();
+    if (!onglets.length) { choisir('#vue').innerHTML = '<div class="carte"><p>Votre compte ne possède pas encore de rôle actif. Contactez le gestionnaire.</p></div>'; return; }
+    if (!onglets.some(([id]) => id === etat.onglet)) etat.onglet = onglets[0][0];
+    choisir('#nav').innerHTML = onglets.map(([id, nom]) => `<button data-onglet="${id}" ${id === etat.onglet ? 'aria-current="page"' : ''}>${nom}</button>`).join('');
+    choisir('#vue').innerHTML = ({ demandes: vueDemandes, trajet: vueTrajet, remarques: vueRemarques, gestion: vueGestion })[etat.onglet]();
   }
-
-  /* ================= Actions ================= */
-  async function enregistrerDemande() {
-    const active = $('#chk-demande').checked;
-    const destination = $('#sel-destination').value;
-    const { error } = await bd.from('demandes').upsert(
-      { profil_id: etat.profil.id, jour: etat.jour, active, destination_id: destination ? Number(destination) : null, modifie_le: new Date().toISOString() },
-      { onConflict: 'profil_id,jour' }
-    );
-    if (error) return afficherToast('Enregistrement impossible : ' + error.message, true);
-    afficherToast(active ? 'Demande enregistrée' : 'Demande désactivée');
-    await rechargerDemandes();
+  async function actualiser() {
+    try {
+      await chargerDonnees();
+      if (etat.profil?.statut_compte === 'en_attente') afficherEcran('attente');
+      else rendre();
+    }
+    catch (erreur) { afficherToast(`Chargement impossible : ${erreur.message}`, true); }
   }
-
-  async function mettreAJourMembre(id, champ, valeur) {
-    if (id === etat.profil.id && champ === 'role' && valeur !== 'gestionnaire' && !confirm('Vous allez perdre vos droits de gestionnaire. Continuer ?')) return rendre();
-    const { error } = await bd.from('profils').update({ [champ]: valeur }).eq('id', id);
-    if (error) { afficherToast('Modification impossible : ' + error.message, true); return rendre(); }
-    afficherToast('Membre mis à jour');
-    await chargerTout();
-    rendre();
+  async function demanderPlace() {
+    const jour = jourCourant(); if (!jour) return afficherToast('Aucun trajet n’est programmé.', true);
+    const destination = choisir('#choix-destination')?.value || null;
+    const { error: erreur } = await base.rpc('demander_place', { _jour_service_id: jour.id, _destination_id: destination });
+    if (erreur) return afficherToast(erreur.message, true);
+    afficherToast('Demande enregistrée.'); await actualiser();
   }
-
-  function brancherEvenements() {
-    const vue = $('#vue');
-
-    $('#nav').addEventListener('click', async (e) => {
-      const b = e.target.closest('[data-onglet]');
-      if (!b) return;
-      etat.onglet = b.dataset.onglet;
-      if (etat.onglet === 'remarques') await chargerRemarques();
+  async function changerDemande(estActive) {
+    const demande = demandePerso();
+    if (estActive) return demanderPlace();
+    if (!demande) return;
+    const { error: erreur } = await base.rpc('definir_demande_active', { _demande_id: demande.id, _actif: false });
+    if (erreur) return afficherToast(erreur.message, true);
+    afficherToast('Demande désactivée.'); await actualiser();
+  }
+  async function traiterChangement(cible) {
+    if (cible.id === 'choix-jour') { etat.jourId = cible.value; await actualiser(); return; }
+    if (cible.id === 'demande-active') { await changerDemande(cible.checked); return; }
+    if (cible.id === 'choix-destination') { if (demandePerso() && demandePerso().statut !== 'annule') await demanderPlace(); return; }
+    if (cible.dataset.decision) {
+      const { error: erreur } = await base.rpc('gestionnaire_decider_demande', { _demande_id: cible.dataset.demande, _decision: cible.dataset.decision, _note: null });
+      if (erreur) throw erreur; afficherToast('Décision enregistrée.'); await actualiser(); return;
+    }
+    if (cible.dataset.valider) {
+      const { error: erreur } = await base.rpc('gestionnaire_valider_passager', { _profil_id: cible.dataset.valider, _categorie: cible.dataset.categorie, _rang_priorite: 100 });
+      if (erreur) throw erreur; afficherToast('Compte validé.'); await actualiser(); return;
+    }
+    if (cible.dataset.prioriteDestination) {
+      const { error: erreur } = await base.from('destinations').update({ rang_priorite: Number(cible.value) }).eq('id', cible.dataset.prioriteDestination);
+      if (erreur) throw erreur; await actualiser(); return;
+    }
+    if (cible.dataset.placesVehicule) {
+      const { error: erreur } = await base.from('vehicules').update({ places_totales: Number(cible.value) }).eq('id', cible.dataset.placesVehicule);
+      if (erreur) throw erreur; await actualiser(); return;
+    }
+    if (cible.dataset.conducteurJour) {
+      const { error: erreur } = await base.from('jours_service').update({ conducteur_id: cible.value || null }).eq('id', cible.dataset.conducteurJour);
+      if (erreur) throw erreur; afficherToast('Conducteur affecté.'); await actualiser(); return;
+    }
+    if (cible.dataset.prioritePassager) {
+      const { error: erreur } = await base.from('passagers').update({ rang_priorite: Number(cible.value) }).eq('profil_id', cible.dataset.prioritePassager);
+      if (erreur) throw erreur; await actualiser(); return;
+    }
+    if (cible.dataset.passagerActif) {
+      const { error: erreur } = await base.from('passagers').update({ est_actif: cible.checked }).eq('profil_id', cible.dataset.passagerActif);
+      if (erreur) throw erreur; await actualiser();
+    }
+    if (cible.dataset.roleConducteur) {
+      const { error: erreur } = await base.rpc('gestionnaire_definir_role_utilisateur', { _profil_id: cible.dataset.roleConducteur, _role: 'conducteur', _actif: cible.checked });
+      if (erreur) throw erreur; await actualiser();
+    }
+    if (cible.dataset.destinationsProfil) {
+      const profilId = cible.dataset.destinationsProfil;
+      const { error: erreurSuppression } = await base.from('destinations_par_defaut_passager').delete().eq('profil_id', profilId);
+      if (erreurSuppression) throw erreurSuppression;
+      const lignes = [...cible.selectedOptions].map((option, rang) => ({ profil_id: profilId, destination_id: option.value, rang_preference: rang + 1 }));
+      if (lignes.length) { const { error: erreur } = await base.from('destinations_par_defaut_passager').insert(lignes); if (erreur) throw erreur; }
+      afficherToast('Destinations habituelles mises à jour.'); await actualiser();
+    }
+  }
+  async function traiterFormulaire(formulaire) {
+    const donnees = new FormData(formulaire);
+    if (formulaire.id === 'form-remarque') {
+      const jour = jourCourant();
+      const { error: erreur } = await base.from('remarques_conducteur').insert({
+        jour_service_id: jour.id, profil_id: etat.utilisateur.id, conducteur_id: donnees.get('conducteur_id'),
+        note: donnees.get('note') ? Number(donnees.get('note')) : null, texte: donnees.get('texte').trim(),
+      });
+      if (erreur) throw erreur; formulaire.reset(); afficherToast('Remarque envoyée.');
+    } else if (formulaire.id === 'form-destination') {
+      const { error: erreur } = await base.from('destinations').insert({ nom: donnees.get('nom').trim(), rang_priorite: Number(donnees.get('rang_priorite')) });
+      if (erreur) throw erreur;
+      const { error: erreurPlanning } = await base.rpc('preparer_jours_service');
+      if (erreurPlanning) throw erreurPlanning; afficherToast('Destination ajoutée.');
+    } else if (formulaire.id === 'form-vehicule') {
+      const { error: erreur } = await base.from('vehicules').insert({ nom: donnees.get('nom').trim(), places_totales: Number(donnees.get('places_totales')) });
+      if (erreur) throw erreur;
+      const { error: erreurPlanning } = await base.rpc('preparer_jours_service');
+      if (erreurPlanning) throw erreurPlanning; afficherToast('Véhicule ajouté.');
+    } else if (formulaire.id === 'form-parametres') {
+      const { error: erreur } = await base.from('parametres_application').update({
+        courriel_gestionnaire: donnees.get('courriel_gestionnaire').trim(), heure_limite_demande: donnees.get('heure_limite_demande'),
+      }).eq('instance_unique', true);
+      if (erreur) throw erreur; afficherToast('Paramètres enregistrés.');
+    }
+    await actualiser();
+  }
+  function brancherActions() {
+    choisir('#nav').addEventListener('click', async (evenement) => {
+      const bouton = evenement.target.closest('[data-onglet]'); if (!bouton) return;
+      etat.onglet = bouton.dataset.onglet;
+      if (etat.onglet === 'remarques' && gestionnaire()) etat.remarques = await resultat(base.from('remarques_conducteur').select('*').order('cree_le', { ascending: false }).limit(200)) || [];
       rendre();
     });
-
-    vue.addEventListener('click', async (e) => {
-      const jour = e.target.closest('[data-jour]');
-      if (jour) { etat.jour = jour.dataset.jour; return rendre(); }
-
-      const sup = e.target.closest('[data-sup-dest]');
-      if (sup && confirm('Supprimer cette destination ?')) {
-        const { error } = await bd.from('destinations').delete().eq('id', sup.dataset.supDest);
-        if (error) return afficherToast(error.message, true);
-        await chargerTout(); rendre(); afficherToast('Destination supprimée');
-      }
-
-      const etoile = e.target.closest('.etoiles label');
-      if (etoile) {
-        const n = Number(etoile.dataset.n);
-        document.querySelectorAll('.etoiles label').forEach((l) => l.classList.toggle('on', Number(l.dataset.n) <= n));
-      }
+    choisir('#vue').addEventListener('change', async (evenement) => {
+      try { await traiterChangement(evenement.target); }
+      catch (erreur) { afficherToast(erreur.message, true); await actualiser(); }
     });
-
-    vue.addEventListener('change', async (e) => {
-      const cible = e.target;
-      if (cible.id === 'chk-demande' || cible.id === 'sel-destination') return enregistrerDemande();
-
-      if (cible.dataset.destPrio) {
-        const { error } = await bd.from('destinations').update({ priorite: Number(cible.value) }).eq('id', cible.dataset.destPrio);
-        if (error) return afficherToast(error.message, true);
-        await chargerTout(); rendre(); return afficherToast('Priorité mise à jour');
-      }
-
-      if (cible.dataset.champ) {
-        const id = cible.closest('[data-membre]').dataset.membre;
-        const champ = cible.dataset.champ;
-        let valeur = cible.type === 'checkbox' ? cible.checked : cible.value;
-        if (champ === 'priorite') valeur = Number(valeur);
-        if (champ === 'destination_id') valeur = valeur ? Number(valeur) : null;
-        return mettreAJourMembre(id, champ, valeur);
-      }
+    choisir('#vue').addEventListener('click', async (evenement) => {
+      const bouton = evenement.target.closest('[data-decision], [data-valider]');
+      if (!bouton) return;
+      try { await traiterChangement(bouton); }
+      catch (erreur) { afficherToast(erreur.message, true); await actualiser(); }
     });
-
-    vue.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const f = e.target;
-      const donnees = new FormData(f);
-
-      if (f.id === 'form-params') {
-        const { error } = await bd.from('parametres').update({ places_total: Number(donnees.get('places_total')), statut: donnees.get('statut') }).eq('id', 1);
-        if (error) return afficherToast(error.message, true);
-        await chargerTout(); rendre(); afficherToast('Véhicule mis à jour');
-      }
-
-      if (f.id === 'form-dest') {
-        const { error } = await bd.from('destinations').insert({ nom: donnees.get('nom').trim(), priorite: Number(donnees.get('priorite')) });
-        if (error) return afficherToast(error.message, true);
-        await chargerTout(); rendre(); afficherToast('Destination ajoutée');
-      }
-
-      if (f.id === 'form-remarque') {
-        const note = donnees.get('note') ? Number(donnees.get('note')) : null;
-        const { error } = await bd.from('remarques').insert({ contenu: donnees.get('contenu').trim(), note });
-        if (error) return afficherToast(error.message, true);
-        f.reset();
-        document.querySelectorAll('.etoiles label').forEach((l) => l.classList.remove('on'));
-        if (estGestionnaire()) await chargerRemarques();
-        rendre(); afficherToast('Remarque envoyée, merci');
-      }
-    });
-
-    $('#btn-deconnexion').addEventListener('click', () => bd.auth.signOut());
-  }
-
-  /* ================= Connexion ================= */
-  function montrer(id) {
-    ['chargement', 'connexion', 'app'].forEach((x) => ($('#' + x).hidden = x !== id));
-  }
-
-  function majFormulaireConnexion() {
-    $('#champ-nom').hidden = !etat.modeInscription;
-    $('#btn-connexion').textContent = etat.modeInscription ? 'Créer mon compte' : 'Se connecter';
-    $('#btn-bascule').textContent = etat.modeInscription ? 'Déjà un compte ? Se connecter' : 'Pas de compte ? Créer un compte';
-    $('#form-connexion').mdp.autocomplete = etat.modeInscription ? 'new-password' : 'current-password';
-  }
-
-  function brancherConnexion() {
-    $('#btn-bascule').addEventListener('click', () => {
-      etat.modeInscription = !etat.modeInscription;
-      $('#erreur-connexion').hidden = true;
-      majFormulaireConnexion();
-    });
-
-    $('#form-connexion').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const f = e.target;
-      const erreur = $('#erreur-connexion');
-      const bouton = $('#btn-connexion');
-      erreur.hidden = true;
-      bouton.disabled = true;
-      try {
-        if (etat.modeInscription) {
-          const { data, error } = await bd.auth.signUp({ email: f.email.value.trim(), password: f.mdp.value, options: { data: { nom: f.nom.value.trim() } } });
-          if (error) throw error;
-          if (!data.session) {
-            erreur.textContent = 'Compte créé. Vérifiez votre boîte mail pour confirmer votre adresse, puis connectez-vous.';
-            erreur.hidden = false;
-            etat.modeInscription = false;
-            majFormulaireConnexion();
-          }
-        } else {
-          const { error } = await bd.auth.signInWithPassword({ email: f.email.value.trim(), password: f.mdp.value });
-          if (error) throw error;
-        }
-      } catch (err) {
-        erreur.textContent = err.message === 'Invalid login credentials' ? 'E-mail ou mot de passe incorrect.' : err.message;
-        erreur.hidden = false;
-      } finally {
-        bouton.disabled = false;
-      }
+    choisir('#vue').addEventListener('submit', async (evenement) => {
+      evenement.preventDefault();
+      try { await traiterFormulaire(evenement.target); }
+      catch (erreur) { afficherToast(erreur.message, true); }
     });
   }
 
-  async function entrerDansApp(utilisateur) {
-  console.log('Utilisateur connecté :', utilisateur.id);
-
-  etat.idUtilisateur = utilisateur.id;
-  montrer('chargement');
-
-  try {
-    await chargerTout();
-
-    console.log('Profil récupéré :', etat.profil);
-
-    if (!etat.profil) {
-      throw new Error(
-        'Aucun profil associé à cet utilisateur. Vérifiez la correspondance entre profils.id et auth.users.id.'
-      );
-    }
-
-    await chargerRemarques();
-
-    montrer('app');
-    rendre();
-
-    console.log('Application chargée avec succès.');
-
-    bd.removeAllChannels();
-
-    bd.channel('suivi-demandes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'demandes' },
-        rechargerDemandes
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'parametres' },
-        async () => {
-          await chargerTout();
-          rendre();
-        }
-      )
-      .subscribe();
-
-  } catch (err) {
-    console.error('Erreur entrée application :', err);
-
-    montrer('connexion');
-
-    const e = $('#erreur-connexion');
-    e.textContent = err.message || 'Erreur de chargement.';
-    e.hidden = false;
+  function decoderCleVapid(cle) {
+    const remplissage = '='.repeat((4 - cle.length % 4) % 4);
+    return Uint8Array.from(atob((cle + remplissage).replaceAll('-', '+').replaceAll('_', '/')), (c) => c.charCodeAt(0));
   }
-}
-
-  /* ================= Installation PWA ================= */
-  let invitationInstall = null;
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    invitationInstall = e;
-    $('#btn-installer').hidden = false;
-  });
-  window.addEventListener('appinstalled', () => { $('#btn-installer').hidden = true; afficherToast('Gestiga est installée'); });
-
-  function brancherInstallation() {
-    const bouton = $('#btn-installer');
+  async function activerRappels() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !window.CONFIG.CLE_VAPID_PUBLIQUE) return afficherToast('Les notifications ne sont pas disponibles ici.', true);
+    const autorisation = await Notification.requestPermission();
+    if (autorisation !== 'granted') return afficherToast('Autorisez les notifications pour recevoir les rappels.', true);
+    const enregistrement = await navigator.serviceWorker.ready;
+    const abonnement = await enregistrement.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decoderCleVapid(window.CONFIG.CLE_VAPID_PUBLIQUE) });
+    const { error: erreur } = await base.from('abonnements_notifications').upsert({ profil_id: etat.utilisateur.id, point_acces: abonnement.endpoint, cles: abonnement.toJSON().keys }, { onConflict: 'point_acces' });
+    if (erreur) throw erreur; afficherToast('Rappels activés sur cet appareil.');
+  }
+  function brancherPwa() {
+    let invitation = null; const bouton = choisir('#btn-installer');
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const dejaInstallee = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
     if (ios && !dejaInstallee) {
       bouton.hidden = false;
-      bouton.addEventListener('click', () => afficherToast('Sur iPhone : touchez Partager puis « Sur l’écran d’accueil »'));
-      return;
+      bouton.addEventListener('click', () => afficherToast('Sur iPhone : touchez Partager, puis « Sur l’écran d’accueil ».'));
     }
-    bouton.addEventListener('click', async () => {
-      if (!invitationInstall) return;
-      invitationInstall.prompt();
-      await invitationInstall.userChoice;
-      invitationInstall = null;
-      bouton.hidden = true;
+    window.addEventListener('beforeinstallprompt', (evenement) => { evenement.preventDefault(); invitation = evenement; bouton.hidden = false; });
+    window.addEventListener('appinstalled', () => { bouton.hidden = true; afficherToast('Gestiga est installée.'); });
+    bouton.addEventListener('click', async () => { if (invitation) { await invitation.prompt(); await invitation.userChoice; invitation = null; bouton.hidden = true; } });
+    choisir('#btn-rappels').addEventListener('click', () => activerRappels().catch((erreur) => afficherToast(erreur.message, true)));
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+
+  function actualiserFormulaireConnexion() {
+    choisir('#champ-nom').hidden = !etat.modeInscription;
+    choisir('#btn-connexion').textContent = etat.modeInscription ? 'Créer mon compte' : 'Se connecter';
+    choisir('#btn-bascule').textContent = etat.modeInscription ? 'Déjà un compte ? Se connecter' : 'Pas de compte ? Créer un compte';
+    choisir('#form-connexion').elements.mot_de_passe.autocomplete = etat.modeInscription ? 'new-password' : 'current-password';
+  }
+  function brancherConnexion() {
+    choisir('#btn-bascule').addEventListener('click', () => { etat.modeInscription = !etat.modeInscription; choisir('#erreur-connexion').hidden = true; actualiserFormulaireConnexion(); });
+    choisir('#form-connexion').addEventListener('submit', async (evenement) => {
+      evenement.preventDefault(); const f = evenement.target; const zoneErreur = choisir('#erreur-connexion'); const bouton = choisir('#btn-connexion');
+      bouton.disabled = true; zoneErreur.hidden = true;
+      try {
+        if (etat.modeInscription) {
+          const { data: donnees, error: erreurInscription } = await base.auth.signUp({ email: f.elements.courriel.value.trim(), password: f.elements.mot_de_passe.value, options: { data: { nom_affiche: f.elements.nom_affiche.value.trim() } } });
+          if (erreurInscription) throw erreurInscription;
+          if (!donnees.session) { zoneErreur.textContent = 'Compte créé. Confirmez votre adresse e-mail et attendez la validation du gestionnaire.'; zoneErreur.hidden = false; etat.modeInscription = false; actualiserFormulaireConnexion(); }
+        } else {
+          const { error: erreurConnexion } = await base.auth.signInWithPassword({ email: f.elements.courriel.value.trim(), password: f.elements.mot_de_passe.value }); if (erreurConnexion) throw erreurConnexion;
+        }
+      } catch (erreurAuth) { zoneErreur.textContent = erreurAuth.message === 'Invalid login credentials' ? 'E-mail ou mot de passe incorrect.' : erreurAuth.message; zoneErreur.hidden = false; }
+      finally { bouton.disabled = false; }
     });
   }
-
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+  async function ouvrirSession(utilisateur) {
+    etat.utilisateur = utilisateur;
+    try {
+      await chargerDonnees(); if (!etat.profil) throw new Error('Profil introuvable. Appliquez les migrations Supabase.');
+      if (etat.profil.statut_compte === 'en_attente') afficherEcran('attente'); else { afficherEcran('app'); rendre(); }
+    } catch (erreurSession) { afficherEcran('connexion'); choisir('#erreur-connexion').textContent = erreurSession.message; choisir('#erreur-connexion').hidden = false; }
   }
-
-  /* ================= Démarrage ================= */
-  function demarrer() {
-    if (!configOk) {
-      montrer('connexion');
-      const e = $('#erreur-connexion');
-      e.textContent = 'Configuration manquante : renseignez votre adresse et votre clé Supabase dans config.js.';
-      e.hidden = false;
-      $('#btn-connexion').disabled = true;
-      return;
-    }
-    brancherConnexion();
-    brancherEvenements();
-    brancherInstallation();
-    majFormulaireConnexion();
-
-    bd.auth.onAuthStateChange((evenement, session) => {
-      if (evenement === 'SIGNED_OUT' || !session) {
-        etat.idUtilisateur = null;
-        etat.profil = null;
-        bd.removeAllChannels();
-        montrer('connexion');
-      } else if (session.user.id !== etat.idUtilisateur) {
-        // différé pour éviter un blocage connu de supabase-js dans ce callback
-        setTimeout(() => entrerDansApp(session.user), 0);
-      }
+  async function demarrer() {
+    if (!configurationValide) { afficherEcran('connexion'); choisir('#erreur-connexion').textContent = 'Renseignez les clés Supabase dans config.js.'; choisir('#erreur-connexion').hidden = false; choisir('#btn-connexion').disabled = true; return; }
+    brancherConnexion(); brancherPwa(); brancherActions();
+    choisir('#btn-deconnexion').addEventListener('click', () => base.auth.signOut());
+    choisir('#btn-deconnexion-attente').addEventListener('click', () => base.auth.signOut());
+    base.auth.onAuthStateChange((evenement, session) => {
+      if (evenement === 'SIGNED_OUT' || !session) { etat.utilisateur = null; etat.profil = null; etat.roles = []; afficherEcran('connexion'); }
+      else if (session.user.id !== etat.utilisateur?.id) setTimeout(() => ouvrirSession(session.user), 0);
     });
+    setInterval(() => { if (etat.utilisateur && !document.hidden) actualiser(); }, 30000);
   }
-
   demarrer();
 })();
