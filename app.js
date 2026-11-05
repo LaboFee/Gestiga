@@ -90,11 +90,21 @@
     const jour = jourCourant(); if (!jour) return selecteurJour();
     const vehicule = Array.isArray(jour.vehicules) ? jour.vehicules[0] : jour.vehicules;
     const demande = demandePerso(); const demandeActive = demande && !['annule', 'refusee'].includes(demande.statut);
+    const demandeRefusee = demande?.statut === 'refusee';
+    const titulaire = etat.passagers.find((p) => p.profil_id === etat.utilisateur?.id)?.categorie === 'titulaire';
     const destinations = etat.destinationsJour.filter((x) => x.jour_service_id === jour.id).sort((a,b) => a.rang_priorite-b.rang_priorite);
     const etats = { acceptee: 'Place confirmée', en_attente: 'En attente de décision du gestionnaire', refusee: 'Demande refusée', annule: 'Demande désactivée' };
+    const actionDemande = demandeActive
+      ? `<button class="bouton danger" type="button" data-action-demande="desactiver">Désactiver ma demande</button>`
+      : demandeRefusee
+        ? '<button class="bouton" type="button" disabled>Demande refusée</button>'
+        : `<button class="bouton principal" type="button" data-action-demande="activer" ${destinations.length ? '' : 'disabled'}>${demande?.statut === 'annule' ? 'Réactiver ma demande' : 'Envoyer ma demande'}</button>`;
+    const instructionDemande = titulaire
+      ? 'Votre demande est créée automatiquement chaque jour ouvré. Désactivez-la si vous ne prenez pas le trajet.'
+      : 'Choisissez votre destination, puis envoyez votre demande. Le gestionnaire devra confirmer votre place.';
     return `${selecteurJour()}<div class="carte vehicule"><div class="chiffre-places">${etat.disponibilite?.places_libres ?? vehicule?.places_totales ?? 0}<span> place(s) disponible(s) sur ${vehicule?.places_totales ?? 0}</span></div><p class="doux">${echapper(dateLisible(jour.date_service))} · ${echapper(vehicule?.nom || 'Véhicule')}</p></div>
       <div class="carte"><h2>Ma demande</h2><p class="doux">${demande ? etats[demande.statut] || demande.statut : 'Aucune demande enregistrée.'}</p>
-      ${passagerActif() ? `<label class="formulaire">Destination<select id="choix-destination" ${destinations.length ? '' : 'disabled'}>${destinations.map((d) => `<option value="${d.destination_id}" ${d.destination_id === demande?.destination_id ? 'selected' : ''}>${echapper(nomDestination(d.destination_id))}</option>`).join('')}</select></label><label class="interrupteur"><input type="checkbox" id="demande-active" ${demandeActive ? 'checked' : ''} ${destinations.length ? '' : 'disabled'}><span></span></label>` : '<p class="erreur">Votre compte attend la validation du gestionnaire.</p>'}</div>
+      ${passagerActif() ? `<p>${instructionDemande}</p><label class="formulaire">Destination<select id="choix-destination" ${destinations.length && !demandeRefusee ? '' : 'disabled'}>${destinations.map((d) => `<option value="${d.destination_id}" ${d.destination_id === demande?.destination_id ? 'selected' : ''}>${echapper(nomDestination(d.destination_id))}</option>`).join('')}</select></label><div class="actions-demande">${actionDemande}</div>` : '<p class="erreur">Votre compte attend la validation du gestionnaire.</p>'}</div>
       ${passagerActif() ? `<label class="formulaire">Mes destinations habituelles<select multiple data-destinations-profil="${etat.utilisateur.id}">${etat.destinations.map((d) => `<option value="${d.id}" ${etat.destinationsDefaut.some((x) => x.profil_id === etat.utilisateur.id && x.destination_id === d.id) ? 'selected' : ''}>${echapper(d.nom)}</option>`).join('')}</select></label>` : ''}
       ${gestionnaire() ? demandesEnAttente() : ''}`;
   }
@@ -186,6 +196,7 @@
     if (cible.id === 'choix-jour') { etat.jourId = cible.value; await actualiser(); return; }
     if (cible.id === 'demande-active') { await changerDemande(cible.checked); return; }
     if (cible.id === 'choix-destination') { if (demandePerso() && demandePerso().statut !== 'annule') await demanderPlace(); return; }
+    if (cible.dataset.actionDemande) { await changerDemande(cible.dataset.actionDemande === 'activer'); return; }
     if (cible.dataset.decision) {
       const { error: erreur } = await base.rpc('gestionnaire_decider_demande', { _demande_id: cible.dataset.demande, _decision: cible.dataset.decision, _note: null });
       if (erreur) throw erreur; afficherToast('Décision enregistrée.'); await actualiser(); return;
@@ -266,7 +277,7 @@
       catch (erreur) { afficherToast(erreur.message, true); await actualiser(); }
     });
     choisir('#vue').addEventListener('click', async (evenement) => {
-      const bouton = evenement.target.closest('[data-decision], [data-valider]');
+      const bouton = evenement.target.closest('[data-decision], [data-valider], [data-action-demande]');
       if (!bouton) return;
       try { await traiterChangement(bouton); }
       catch (erreur) { afficherToast(erreur.message, true); await actualiser(); }
