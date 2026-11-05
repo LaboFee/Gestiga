@@ -1,5 +1,11 @@
 // Envoie au gestionnaire unique le resume des mouvements sur les demandes.
-import { clientService, echapperHtml, formaterDateLongue } from "../_partage/client.ts";
+function echapperHtml(texte: string): string {
+  return texte
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
 
 const CLE_RESEND = Deno.env.get("RESEND_API_KEY");
 const EXPEDITEUR = Deno.env.get("EXPEDITEUR_COURRIEL") ?? "Gestiga <onboarding@resend.dev>";
