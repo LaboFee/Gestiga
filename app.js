@@ -508,23 +508,57 @@
   }
 
   async function entrerDansApp(utilisateur) {
-    etat.idUtilisateur = utilisateur.id;
-    try {
-      await chargerTout();
-      if (!etat.profil) throw new Error('Profil introuvable. Vérifiez que le script base.sql a bien été exécuté.');
-      montrer('app');
-      rendre();
-      bd.channel('suivi-demandes')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'demandes' }, rechargerDemandes)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'parametres' }, async () => { await chargerTout(); rendre(); })
-        .subscribe();
-    } catch (err) {
-      montrer('connexion');
-      const e = $('#erreur-connexion');
-      e.textContent = err.message || 'Erreur de chargement.';
-      e.hidden = false;
+  console.log('Utilisateur connecté :', utilisateur.id);
+
+  etat.idUtilisateur = utilisateur.id;
+  montrer('chargement');
+
+  try {
+    await chargerTout();
+
+    console.log('Profil récupéré :', etat.profil);
+
+    if (!etat.profil) {
+      throw new Error(
+        'Aucun profil associé à cet utilisateur. Vérifiez la correspondance entre profils.id et auth.users.id.'
+      );
     }
+
+    await chargerRemarques();
+
+    montrer('app');
+    rendre();
+
+    console.log('Application chargée avec succès.');
+
+    bd.removeAllChannels();
+
+    bd.channel('suivi-demandes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'demandes' },
+        rechargerDemandes
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'parametres' },
+        async () => {
+          await chargerTout();
+          rendre();
+        }
+      )
+      .subscribe();
+
+  } catch (err) {
+    console.error('Erreur entrée application :', err);
+
+    montrer('connexion');
+
+    const e = $('#erreur-connexion');
+    e.textContent = err.message || 'Erreur de chargement.';
+    e.hidden = false;
   }
+}
 
   /* ================= Installation PWA ================= */
   let invitationInstall = null;
