@@ -87,7 +87,8 @@
     }).join('')}</ul>` : '<p class="vide">Aucune demande en attente.</p>'}</div>`;
   }
   function vueDemandes() {
-    const jour = jourCourant(); if (!jour) return selecteurJour();
+    const jour = jourCourant();
+    if (!jour) return `${selecteurJour()}<div class="carte"><h2>Ma demande</h2><p class="vide">Aucun trajet n’est encore programmé pour les prochains jours ouvrés. Dès qu’un trajet sera créé par le gestionnaire, votre demande apparaîtra ici.</p></div>`;
     const vehicule = Array.isArray(jour.vehicules) ? jour.vehicules[0] : jour.vehicules;
     const demande = demandePerso(); const demandeActive = demande && !['annule', 'refusee'].includes(demande.statut);
     const demandeRefusee = demande?.statut === 'refusee';
@@ -103,8 +104,8 @@
       ? 'Votre demande est créée automatiquement chaque jour ouvré. Désactivez-la si vous ne prenez pas le trajet.'
       : 'Choisissez votre destination, puis envoyez votre demande. Le gestionnaire devra confirmer votre place.';
     return `${selecteurJour()}<div class="carte vehicule"><div class="chiffre-places">${etat.disponibilite?.places_libres ?? vehicule?.places_totales ?? 0}<span> place(s) disponible(s) sur ${vehicule?.places_totales ?? 0}</span></div><p class="doux">${echapper(dateLisible(jour.date_service))} · ${echapper(vehicule?.nom || 'Véhicule')}</p></div>
-      <div class="carte"><h2>Ma demande</h2><p class="doux">${demande ? etats[demande.statut] || demande.statut : 'Aucune demande enregistrée.'}</p>
-      ${passagerActif() ? `<p>${instructionDemande}</p><label class="formulaire">Destination<select id="choix-destination" ${destinations.length && !demandeRefusee ? '' : 'disabled'}>${destinations.map((d) => `<option value="${d.destination_id}" ${d.destination_id === demande?.destination_id ? 'selected' : ''}>${echapper(nomDestination(d.destination_id))}</option>`).join('')}</select></label><div class="actions-demande">${actionDemande}</div>` : '<p class="erreur">Votre compte attend la validation du gestionnaire.</p>'}</div>
+      <div class="carte"><h2>Ma demande</h2><p class="doux">${demande ? etats[demande.statut] || demande.statut : 'Aucune demande enregistrée pour ce trajet.'}</p>
+      ${passagerActif() ? `${destinations.length ? `<p>${instructionDemande}</p><label class="formulaire">Destination<select id="choix-destination" ${demandeRefusee ? 'disabled' : ''}>${destinations.map((d) => `<option value="${d.destination_id}" ${d.destination_id === demande?.destination_id ? 'selected' : ''}>${echapper(nomDestination(d.destination_id))}</option>`).join('')}</select></label><div class="actions-demande">${actionDemande}</div>` : '<p class="vide">Les destinations de ce trajet ne sont pas encore configurées. Contactez le gestionnaire.</p>'}` : '<p class="erreur">Votre compte attend la validation du gestionnaire.</p>'}</div>
       ${passagerActif() ? `<label class="formulaire">Mes destinations habituelles<select multiple data-destinations-profil="${etat.utilisateur.id}">${etat.destinations.map((d) => `<option value="${d.id}" ${etat.destinationsDefaut.some((x) => x.profil_id === etat.utilisateur.id && x.destination_id === d.id) ? 'selected' : ''}>${echapper(d.nom)}</option>`).join('')}</select></label>` : ''}
       ${gestionnaire() ? demandesEnAttente() : ''}`;
   }
