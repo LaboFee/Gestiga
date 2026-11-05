@@ -129,6 +129,23 @@ textarea { min-height: 110px; resize: vertical; }
 .nav button[aria-current="page"] { background: var(--petrole); color: #fff; }
 @media (prefers-color-scheme: dark) { .nav button[aria-current="page"] { background: var(--signal); color: #1c1500; } }
 
+.sous-nav {
+  display: flex; gap: .35rem; overflow-x: auto; padding: .25rem 0 .55rem;
+  border-bottom: 1px solid var(--bord); scrollbar-width: thin;
+}
+.sous-nav button, .filtres-demandes button {
+  flex: 0 0 auto; font: inherit; font-weight: 600; color: var(--doux); background: var(--carte);
+  border: 1px solid var(--bord); border-radius: 999px; padding: .55rem .85rem; cursor: pointer; white-space: nowrap;
+}
+.sous-nav button[aria-current="page"], .filtres-demandes button[aria-selected="true"] {
+  color: #fff; background: var(--petrole); border-color: var(--petrole);
+}
+.filtres-demandes { display: flex; gap: .45rem; overflow-x: auto; padding: .1rem 0 .25rem; }
+.filtres-demandes button span { display: inline-grid; place-items: center; min-width: 1.4rem; margin-left: .2rem; padding: 0 .3rem; border-radius: 999px; background: var(--off-fond); color: var(--texte); font-size: .8rem; }
+@media (prefers-color-scheme: dark) {
+  .sous-nav button[aria-current="page"], .filtres-demandes button[aria-selected="true"] { color: #1c1500; background: var(--signal); border-color: var(--signal); }
+}
+
 .vue { max-width: 880px; margin: 0 auto; padding: 1.25rem; display: grid; gap: 1.1rem; padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px)); }
 .carte { background: var(--carte); border-radius: var(--rayon); padding: 1.25rem; box-shadow: var(--ombre); display: grid; gap: .9rem; }
 .rangee { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
@@ -187,6 +204,13 @@ textarea { min-height: 110px; resize: vertical; }
 .liste li { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .65rem 0; border-top: 1px solid var(--bord); }
 .liste li:first-child { border-top: 0; }
 .liste .sous { color: var(--doux); font-size: .85rem; }
+.liste li > span { display: grid; gap: .15rem; }
+.actions-liste { display: flex !important; flex-wrap: wrap; justify-content: flex-end; gap: .4rem !important; }
+.liste-passagers li { align-items: flex-start; }
+.liste-passagers label { min-width: 130px; }
+.liste-passagers select[multiple] { min-height: 6.5rem; }
+.champ-inline { display: flex; align-items: center; gap: .45rem; }
+.champ-inline input { width: 6rem; }
 .vide { color: var(--doux); text-align: center; padding: 1rem; }
 
 .statut-moi { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
@@ -225,5 +249,27 @@ td select { min-width: 120px; padding: .45rem .5rem; }
 @media (max-width: 560px) {
   .utilisateur { display: none; }
   .vue { padding: .9rem; }
+}
+@media (max-width: 640px) {
+  #app { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
+  .entete { gap: .5rem; padding-inline: .75rem; }
+  .entete-droite { gap: .35rem; }
+  .entete-droite .bouton { padding: .42rem .58rem; font-size: .8rem; }
+  .nav {
+    position: fixed; inset: auto 0 0; z-index: 30; width: 100%; gap: .2rem;
+    padding: .35rem .35rem calc(.35rem + env(safe-area-inset-bottom, 0px));
+    border-bottom: 0; border-top: 1px solid var(--bord); box-shadow: 0 -5px 18px rgba(11, 58, 83, .1);
+    overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
+  }
+  .nav::-webkit-scrollbar, .sous-nav::-webkit-scrollbar, .filtres-demandes::-webkit-scrollbar { display: none; }
+  .nav button { flex: 0 0 auto; padding: .58rem .72rem; font-size: .82rem; }
+  .vue { gap: .8rem; }
+  .carte { padding: 1rem; }
+  .liste li { align-items: stretch; flex-direction: column; gap: .55rem; }
+  .liste li > label { width: 100%; }
+  .actions-liste { justify-content: flex-start; }
+  .sous-nav { position: sticky; top: 0; z-index: 4; background: var(--fond); padding-block: .4rem; }
+  .sous-nav button, .filtres-demandes button { padding: .5rem .72rem; font-size: .86rem; }
+  .toast { bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

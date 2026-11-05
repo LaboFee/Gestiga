@@ -15,7 +15,7 @@
   const base = configurationValide ? window.supabase.createClient(window.CONFIG.SUPABASE_URL, window.CONFIG.SUPABASE_CLE) : null;
   const etat = { utilisateur: null, profil: null, profils: [], roles: [], tousRoles: [], passagers: [], destinations: [],
     destinationsDefaut: [], vehicules: [], jours: [], destinationsJour: [], demandes: [], remarques: [], conducteurs: [],
-    parametres: null, disponibilite: null, jourId: null, onglet: 'demandes', modeInscription: false };
+    parametres: null, disponibilite: null, jourId: null, onglet: 'gestion-demandes', ongletGestion: 'comptes', filtreDemandes: 'en_attente', modeInscription: false };
   const resultat = async (requete) => { const reponse = await requete; if (reponse.error) throw reponse.error; return reponse.data; };
   const gestionnaire = () => etat.roles.includes('gestionnaire');
   const conducteur = () => etat.roles.includes('conducteur');
@@ -73,19 +73,6 @@
       return `<option value="${j.id}" ${j.id === etat.jourId ? 'selected' : ''}>${echapper(dateLisible(j.date_service))} · ${echapper(v?.nom || 'Véhicule')}</option>`;
     }).join('')}</select></label>`;
   }
-  function demandesEnAttente() {
-    const demandes = etat.demandes.filter((d) => d.statut === 'en_attente').sort((a, b) => {
-      const pa = etat.passagers.find((p) => p.profil_id === a.profil_id);
-      const pb = etat.passagers.find((p) => p.profil_id === b.profil_id);
-      const da = etat.destinations.find((d) => d.id === a.destination_id);
-      const db = etat.destinations.find((d) => d.id === b.destination_id);
-      return (pa?.rang_priorite ?? 100) - (pb?.rang_priorite ?? 100) || (da?.rang_priorite ?? 100) - (db?.rang_priorite ?? 100);
-    });
-    return `<div class="carte"><h2>Demandes à décider</h2>${demandes.length ? `<ul class="liste">${demandes.map((d) => {
-      const p = etat.passagers.find((x) => x.profil_id === d.profil_id);
-      return `<li><span>${echapper(nomPassager(d.profil_id))} · ${echapper(p?.categorie || 'invité')} · ${echapper(nomDestination(d.destination_id))} · priorité ${p?.rang_priorite ?? '—'}</span><span><button class="bouton principal" data-decision="acceptee" data-demande="${d.id}">Accepter</button> <button class="bouton danger" data-decision="refusee" data-demande="${d.id}">Refuser</button></span></li>`;
-    }).join('')}</ul>` : '<p class="vide">Aucune demande en attente.</p>'}</div>`;
-  }
   function vueDemandes() {
     const jour = jourCourant();
     if (!jour) return `${selecteurJour()}<div class="carte"><h2>Ma demande</h2><p class="vide">Aucun trajet n’est encore programmé pour les prochains jours ouvrés. Dès qu’un trajet sera créé par le gestionnaire, votre demande apparaîtra ici.</p></div>`;
@@ -139,20 +126,41 @@
   }
   function vueGestion() {
     const enAttente = etat.profils.filter((p) => p.statut_compte === 'en_attente');
-    return `<div class="carte"><h2>Créer les trajets d’une journée</h2><p class="doux">Choisissez un jour ouvré. Gestiga prépare les trajets pour tous les véhicules actifs, ajoute les destinations actives et crée les demandes des titulaires dans la limite des places.</p><form id="form-planning" class="formulaire grille-2"><label>Date du trajet<input type="date" name="date_service" min="${dateAbidjan(new Date())}" value="${dateAbidjan(new Date())}" required></label><button class="bouton principal">Préparer les trajets</button></form></div>
-      <div class="carte"><h2>Comptes à valider</h2>${enAttente.length ? `<ul class="liste">${enAttente.map((p) => `<li>${echapper(p.nom_affiche || p.courriel || 'Nouveau compte')} · ${echapper(p.courriel || '')}<span><button class="bouton principal" data-valider="${p.id}" data-categorie="invite">Valider comme invité</button> <button class="bouton" data-valider="${p.id}" data-categorie="titulaire">Comme titulaire</button></span></li>`).join('')}</ul>` : '<p class="vide">Aucun compte en attente.</p>'}</div>
-      <div class="carte"><h2>Véhicules</h2><form id="form-vehicule" class="formulaire grille-2"><label>Nom<input name="nom" required></label><label>Places<input name="places_totales" type="number" min="1" required></label><button class="bouton principal">Ajouter</button></form>${etat.vehicules.map((v) => `<p>${echapper(v.nom)} — <input type="number" min="1" data-places-vehicule="${v.id}" value="${v.places_totales}"> places</p>`).join('')}</div>
-      <div class="carte"><h2>Conducteurs et trajets</h2><ul class="liste">${etat.jours.map((j) => `<li>${echapper(dateLisible(j.date_service))} · ${echapper((Array.isArray(j.vehicules) ? j.vehicules[0] : j.vehicules)?.nom || 'Véhicule')}<label>Conducteur<select data-conducteur-jour="${j.id}"><option value="">À attribuer</option>${etat.conducteurs.map((c) => `<option value="${c.id}" ${c.id === j.conducteur_id ? 'selected' : ''}>${echapper(c.nom_affiche)}</option>`).join('')}</select></label></li>`).join('') || '<li>Aucun trajet généré.</li>'}</ul></div>
-      <div class="carte"><h2>Destinations</h2><p class="doux">Un rang plus petit signifie une priorité plus élevée.</p><form id="form-destination" class="formulaire grille-2"><label>Nom<input name="nom" required></label><label>Priorité<input name="rang_priorite" type="number" min="0" value="100" required></label><button class="bouton principal">Ajouter</button></form><ul class="liste">${etat.destinations.map((d) => `<li>${echapper(d.nom)} <label>Priorité<input type="number" min="0" data-priorite-destination="${d.id}" value="${d.rang_priorite}"></label></li>`).join('')}</ul></div>
-      <div class="carte"><h2>Paramètres</h2><form id="form-parametres" class="formulaire grille-2"><label>Adresse du gestionnaire<input type="email" name="courriel_gestionnaire" value="${echapper(etat.parametres?.courriel_gestionnaire || '')}" required></label><label>Heure limite<input type="time" name="heure_limite_demande" value="${etat.parametres?.heure_limite_demande || '16:30'}" required></label><button class="bouton principal">Enregistrer</button></form></div>
-      <div class="carte"><h2>Passagers</h2><ul class="liste">${etat.passagers.map((p) => `<li>${echapper(nomPassager(p.profil_id))} · ${echapper(p.categorie)} <label>Priorité<input type="number" min="0" data-priorite-passager="${p.profil_id}" value="${p.rang_priorite}"></label><label>Conducteur<input type="checkbox" data-role-conducteur="${p.profil_id}" ${etat.tousRoles.some((r) => r.profil_id === p.profil_id && r.role === 'conducteur') ? 'checked' : ''}></label><label>Destinations habituelles<select multiple data-destinations-profil="${p.profil_id}">${etat.destinations.map((d) => `<option value="${d.id}" ${etat.destinationsDefaut.some((x) => x.profil_id === p.profil_id && x.destination_id === d.id) ? 'selected' : ''}>${echapper(d.nom)}</option>`).join('')}</select></label><label>Actif<input type="checkbox" data-passager-actif="${p.profil_id}" ${p.est_actif ? 'checked' : ''}></label></li>`).join('')}</ul></div>`;
+    const passagers = etat.passagers.map((p) => `<li><strong>${echapper(nomPassager(p.profil_id))}</strong><span class="badge ${p.categorie === 'titulaire' ? 'titulaire' : ''}">${echapper(p.categorie)}</span><label>Priorité<input type="number" min="0" data-priorite-passager="${p.profil_id}" value="${p.rang_priorite}"></label><label>Conducteur<input type="checkbox" data-role-conducteur="${p.profil_id}" ${etat.tousRoles.some((r) => r.profil_id === p.profil_id && r.role === 'conducteur') ? 'checked' : ''}></label><label>Destinations habituelles<select multiple data-destinations-profil="${p.profil_id}">${etat.destinations.map((d) => `<option value="${d.id}" ${etat.destinationsDefaut.some((x) => x.profil_id === p.profil_id && x.destination_id === d.id) ? 'selected' : ''}>${echapper(d.nom)}</option>`).join('')}</select></label><label>Actif<input type="checkbox" data-passager-actif="${p.profil_id}" ${p.est_actif ? 'checked' : ''}></label></li>`).join('');
+    const sections = {
+      comptes: `<div class="carte"><h2>Comptes à valider</h2><p class="doux">Le gestionnaire choisit si chaque nouveau compte devient titulaire ou invité.</p>${enAttente.length ? `<ul class="liste">${enAttente.map((p) => `<li><span><strong>${echapper(p.nom_affiche || p.courriel || 'Nouveau compte')}</strong><small class="sous">${echapper(p.courriel || '')}</small></span><span class="actions-liste"><button class="bouton principal" data-valider="${p.id}" data-categorie="invite">Valider comme invité</button><button class="bouton" data-valider="${p.id}" data-categorie="titulaire">Valider comme titulaire</button></span></li>`).join('')}</ul>` : '<p class="vide">Aucun compte en attente.</p>'}</div>`,
+      passagers: `<div class="carte"><h2>Passagers et équipe</h2><p class="doux">Réglez ici les priorités, les rôles, les destinations habituelles et l’accès au service.</p><ul class="liste liste-passagers">${passagers || '<li>Aucun passager validé.</li>'}</ul></div>`,
+      trajets: `<div class="carte"><h2>Préparer les trajets</h2><p class="doux">Choisissez un jour ouvré. Gestiga prépare les trajets pour tous les véhicules actifs, ajoute les destinations actives et crée les demandes des titulaires dans la limite des places.</p><form id="form-planning" class="formulaire grille-2"><label>Date du trajet<input type="date" name="date_service" min="${dateAbidjan(new Date())}" value="${dateAbidjan(new Date())}" required></label><button class="bouton principal">Préparer les trajets</button></form></div><div class="carte"><h2>Conducteurs des trajets</h2><ul class="liste">${etat.jours.map((j) => `<li><span><strong>${echapper(dateLisible(j.date_service))}</strong><small class="sous">${echapper((Array.isArray(j.vehicules) ? j.vehicules[0] : j.vehicules)?.nom || 'Véhicule')}</small></span><label>Conducteur<select data-conducteur-jour="${j.id}"><option value="">À attribuer</option>${etat.conducteurs.map((c) => `<option value="${c.id}" ${c.id === j.conducteur_id ? 'selected' : ''}>${echapper(c.nom_affiche)}</option>`).join('')}</select></label></li>`).join('') || '<li>Aucun trajet programmé.</li>'}</ul></div>`,
+      organisation: `<div class="carte"><h2>Véhicules</h2><form id="form-vehicule" class="formulaire grille-2"><label>Nom<input name="nom" required></label><label>Places<input name="places_totales" type="number" min="1" required></label><button class="bouton principal">Ajouter le véhicule</button></form>${etat.vehicules.map((v) => `<label class="rangee">${echapper(v.nom)}<span class="champ-inline"><input type="number" min="1" data-places-vehicule="${v.id}" value="${v.places_totales}"> places</span></label>`).join('') || '<p class="vide">Aucun véhicule actif.</p>'}</div><div class="carte"><h2>Destinations</h2><p class="doux">Un rang plus petit signifie une priorité plus élevée.</p><form id="form-destination" class="formulaire grille-2"><label>Nom<input name="nom" required></label><label>Priorité<input name="rang_priorite" type="number" min="0" value="100" required></label><button class="bouton principal">Ajouter la destination</button></form><ul class="liste">${etat.destinations.map((d) => `<li><strong>${echapper(d.nom)}</strong><label>Priorité<input type="number" min="0" data-priorite-destination="${d.id}" value="${d.rang_priorite}"></label></li>`).join('') || '<li>Aucune destination définie.</li>'}</ul></div>`,
+      parametres: `<div class="carte"><h2>Paramètres de Gestiga</h2><form id="form-parametres" class="formulaire grille-2"><label>Adresse e-mail du gestionnaire<input type="email" name="courriel_gestionnaire" value="${echapper(etat.parametres?.courriel_gestionnaire || '')}" required></label><label>Heure limite des demandes<input type="time" name="heure_limite_demande" value="${etat.parametres?.heure_limite_demande || '16:30'}" required></label><button class="bouton principal">Enregistrer</button></form></div>`,
+    };
+    const onglets = [['comptes', 'Comptes'], ['passagers', 'Passagers'], ['trajets', 'Trajets'], ['organisation', 'Véhicules et destinations'], ['parametres', 'Paramètres']];
+    if (!sections[etat.ongletGestion]) etat.ongletGestion = 'comptes';
+    return `<nav class="sous-nav" aria-label="Sections de gestion">${onglets.map(([id, libelle]) => `<button type="button" data-onglet-gestion="${id}" ${etat.ongletGestion === id ? 'aria-current="page"' : ''}>${libelle}</button>`).join('')}</nav>${sections[etat.ongletGestion]}`;
+  }
+  function vueDemandesGestion() {
+    const jour = jourCourant();
+    if (!jour) return `${selecteurJour()}<div class="carte"><h2>Demandes des passagers</h2><p class="vide">Aucun trajet n’est programmé.</p></div>`;
+    const demandes = etat.demandes.filter((d) => d.jour_service_id === jour.id);
+    const compteurs = Object.fromEntries(['en_attente', 'acceptee', 'refusee'].map((statut) => [statut, demandes.filter((d) => d.statut === statut).length]));
+    const visibles = demandes.filter((d) => d.statut === etat.filtreDemandes).sort((a, b) => {
+      const pa = etat.passagers.find((p) => p.profil_id === a.profil_id), pb = etat.passagers.find((p) => p.profil_id === b.profil_id);
+      const da = etat.destinations.find((d) => d.id === a.destination_id), db = etat.destinations.find((d) => d.id === b.destination_id);
+      return (pa?.rang_priorite ?? 100) - (pb?.rang_priorite ?? 100) || (da?.rang_priorite ?? 100) - (db?.rang_priorite ?? 100);
+    });
+    const libelles = { en_attente: 'À décider', acceptee: 'Acceptées', refusee: 'Refusées' };
+    return `${selecteurJour()}<div class="carte"><div class="rangee"><div><h2>Demandes des passagers</h2><p class="doux">Les titulaires et les priorités apparaissent en premier.</p></div><span class="badge attente">${compteurs.en_attente} à décider</span></div><div class="filtres-demandes" role="group" aria-label="Filtrer les demandes">${Object.entries(libelles).map(([statut, libelle]) => `<button type="button" data-filtre-demandes="${statut}" aria-selected="${etat.filtreDemandes === statut}">${libelle} <span>${compteurs[statut]}</span></button>`).join('')}</div>${visibles.length ? `<ul class="liste">${visibles.map((d) => {
+      const p = etat.passagers.find((x) => x.profil_id === d.profil_id);
+      return `<li><span><strong>${echapper(nomPassager(d.profil_id))}</strong><small class="sous">${echapper(p?.categorie || 'invité')} · ${echapper(nomDestination(d.destination_id))} · priorité ${p?.rang_priorite ?? '—'}</small></span>${d.statut === 'en_attente' ? `<span class="actions-liste"><button class="bouton principal" data-decision="acceptee" data-demande="${d.id}">Accepter</button><button class="bouton danger" data-decision="refusee" data-demande="${d.id}">Refuser</button></span>` : `<span class="badge ${d.statut === 'acceptee' ? 'ok' : ''}">${d.statut === 'acceptee' ? 'Place confirmée' : 'Refusée'}</span>`}</li>`;
+    }).join('')}</ul>` : `<p class="vide">Aucune demande ${etat.filtreDemandes === 'en_attente' ? 'à décider' : etat.filtreDemandes === 'acceptee' ? 'acceptée' : 'refusée'} pour ce trajet.</p>`}</div>`;
   }
   function ongletsDisponibles() {
     if (!profilActif()) return [];
     const onglets = [];
+    if (gestionnaire()) onglets.push(['gestion-demandes', 'Demandes']);
     if (passagerActif() && !conducteur()) onglets.push(['demandes', 'Ma demande']);
     if (conducteur() || gestionnaire()) onglets.push(['trajet', 'Manifeste']);
-    if (!conducteur()) onglets.push(['remarques', 'Remarques']);
+    if (!conducteur() || gestionnaire()) onglets.push(['remarques', 'Remarques']);
     if (gestionnaire()) onglets.push(['gestion', 'Gestion']);
     return onglets;
   }
@@ -169,7 +177,7 @@
     if (!onglets.length) { choisir('#vue').innerHTML = '<div class="carte"><p>Votre compte ne possède pas encore de rôle actif. Contactez le gestionnaire.</p></div>'; return; }
     if (!onglets.some(([id]) => id === etat.onglet)) etat.onglet = onglets[0][0];
     choisir('#nav').innerHTML = onglets.map(([id, nom]) => `<button data-onglet="${id}" ${id === etat.onglet ? 'aria-current="page"' : ''}>${nom}</button>`).join('');
-    choisir('#vue').innerHTML = ({ demandes: vueDemandes, trajet: vueTrajet, remarques: vueRemarques, gestion: vueGestion })[etat.onglet]();
+    choisir('#vue').innerHTML = ({ demandes: vueDemandes, 'gestion-demandes': vueDemandesGestion, trajet: vueTrajet, remarques: vueRemarques, gestion: vueGestion })[etat.onglet]();
   }
   async function actualiser() {
     try {
@@ -284,6 +292,10 @@
       catch (erreur) { afficherToast(erreur.message, true); await actualiser(); }
     });
     choisir('#vue').addEventListener('click', async (evenement) => {
+      const ongletGestion = evenement.target.closest('[data-onglet-gestion]');
+      if (ongletGestion) { etat.ongletGestion = ongletGestion.dataset.ongletGestion; rendre(); return; }
+      const filtreDemandes = evenement.target.closest('[data-filtre-demandes]');
+      if (filtreDemandes) { etat.filtreDemandes = filtreDemandes.dataset.filtreDemandes; rendre(); return; }
       const bouton = evenement.target.closest('[data-decision], [data-valider], [data-action-demande]');
       if (!bouton) return;
       try { await traiterChangement(bouton); }
